@@ -4,17 +4,23 @@ import path from 'node:path';
 const SAMPLE_RATE = 24000;
 const OUTPUT_DIR = path.resolve(process.cwd(), 'assets/resources/audio');
 const TWO_PI = Math.PI * 2;
+const NATURAL_MAJOR_INTERVALS = [0, 2, 4, 5, 7, 9, 11];
+const NATURAL_MAJOR_NOTE_NAMES = ['c', 'd', 'e', 'f', 'g', 'a', 'b'];
+const C5_MIDI = 72;
 
-const PERFECT_NOTES = [
-  ['perfect-01-a4', 440.0],
-  ['perfect-02-b4', 493.88],
-  ['perfect-03-cs5', 554.37],
-  ['perfect-04-e5', 659.25],
-  ['perfect-05-fs5', 739.99],
-  ['perfect-06-a5', 880.0],
-  ['perfect-07-b5', 987.77],
-  ['perfect-08-cs6', 1108.73],
-];
+function midiToFrequency(midi) {
+  return 440 * 2 ** ((midi - 69) / 12);
+}
+
+const PERFECT_NOTES = NATURAL_MAJOR_INTERVALS.map((semitoneOffset, index) => [
+  `perfect-major-${NATURAL_MAJOR_NOTE_NAMES[index]}5`,
+  midiToFrequency(C5_MIDI + semitoneOffset),
+]);
+
+const PERFECT_RISE_NOTES = NATURAL_MAJOR_INTERVALS.map((semitoneOffset, index) => [
+  `perfect-rise-${NATURAL_MAJOR_NOTE_NAMES[index]}`,
+  semitoneOffset,
+]);
 
 function clamp(value, min = -1, max = 1) {
   return Math.max(min, Math.min(max, value));
@@ -62,6 +68,35 @@ function addBell(samples, start, duration, frequency, gain = 1) {
     const body = 0.7 * Math.sin(phase)
       + 0.22 * triangle(phase)
       + 0.08 * Math.sin(phase * 2.01);
+    samples[index] += gain * envelope * body;
+  }
+}
+
+function addShepardBell(samples, start, duration, semitoneOffset, gain = 1) {
+  const startIndex = Math.floor(start * SAMPLE_RATE);
+  const endIndex = Math.min(samples.length, Math.ceil((start + duration) * SAMPLE_RATE));
+  const spectralCenter = midiToFrequency(84); // C6: clear on phones without becoming piercing.
+  const widthInOctaves = 1.12;
+  const voices = [];
+
+  for (let octave = 2; octave <= 8; octave += 1) {
+    const midi = 24 + octave * 12 + semitoneOffset;
+    const frequency = midiToFrequency(midi);
+    if (frequency >= SAMPLE_RATE * 0.42) continue;
+    const octaveDistance = Math.log2(frequency / spectralCenter);
+    const weight = Math.exp(-0.5 * (octaveDistance / widthInOctaves) ** 2);
+    if (weight > 0.006) voices.push({ frequency, weight, phase: 0 });
+  }
+
+  const weightSum = voices.reduce((sum, voice) => sum + voice.weight, 0);
+  for (let index = startIndex; index < endIndex; index += 1) {
+    const localTime = index / SAMPLE_RATE - start;
+    const envelope = pluckEnvelope(localTime, duration, 0.0045, 0.064, 0.055);
+    let body = 0;
+    for (const voice of voices) {
+      voice.phase += (TWO_PI * voice.frequency) / SAMPLE_RATE;
+      body += (voice.weight / weightSum) * Math.sin(voice.phase);
+    }
     samples[index] += gain * envelope * body;
   }
 }
@@ -151,6 +186,69 @@ function addWoodTick(samples, seedText, cents = 0, gain = 1) {
   }
 }
 
+function addBlockCut(samples, seedText, cents = 0) {
+  const rng = makeRng(`${seedText}-block-cut`);
+  const duration = Math.min(0.21, samples.length / SAMPLE_RATE);
+  const pitchRatio = 2 ** (cents / 1200);
+  const modeFrequencies = [92, 385, 645, 1135, 1490, 2630]
+    .map((frequency) => frequency * pitchRatio * (0.99 + rng() * 0.02));
+  const modeGains = [0.13, 0.17, 0.12, 1, 0.16, 0.22];
+  const modeDecays = [0.036, 0.035, 0.027, 0.026, 0.019, 0.012];
+  const modeSweeps = [0.025, 0.04, 0.045, 0.095, 0.055, 0.035];
+  const events = [
+    {
+      start: 0.004 + (rng() - 0.5) * 0.002,
+      gain: 1,
+      attack: 0.008,
+      modeShape: [1, 1, 1, 1, 1, 1],
+      phases: modeFrequencies.map(() => 0),
+    },
+    {
+      start: 0.092 + (rng() - 0.5) * 0.006,
+      gain: 0.58 + rng() * 0.06,
+      attack: 0.005,
+      modeShape: [1.2, 2.4, 1.2, 0.35, 0.3, 0.12],
+      phases: modeFrequencies.map(() => 0),
+    },
+  ];
+  let lowNoise = 0;
+  let cutBand = 0;
+
+  for (let index = 0; index < Math.floor(duration * SAMPLE_RATE); index += 1) {
+    const time = index / SAMPLE_RATE;
+    const release = smooth((duration - time) / 0.022);
+    const noise = rng() * 2 - 1;
+    lowNoise += 0.09 * (noise - lowNoise);
+    cutBand += 0.48 * ((noise - lowNoise) - cutBand);
+
+    let cut = 0;
+    for (const event of events) {
+      const eventTime = time - event.start;
+      if (eventTime < 0 || eventTime >= 0.09) continue;
+
+      const eventAttack = smooth(eventTime / event.attack);
+      for (let modeIndex = 0; modeIndex < modeFrequencies.length; modeIndex += 1) {
+        const modeFrequency = modeFrequencies[modeIndex]
+          * (1 + modeSweeps[modeIndex] * Math.exp(-eventTime / 0.012));
+        event.phases[modeIndex] += (TWO_PI * modeFrequency) / SAMPLE_RATE;
+        const modeEnvelope = eventAttack
+          * Math.exp(-eventTime / modeDecays[modeIndex])
+          * smooth((0.09 - eventTime) / 0.022);
+        cut += event.gain * modeGains[modeIndex] * event.modeShape[modeIndex]
+          * Math.sin(event.phases[modeIndex])
+          * modeEnvelope;
+      }
+
+      const crackEnvelope = eventAttack
+        * Math.exp(-eventTime / 0.011)
+        * smooth((0.055 - eventTime) / 0.016);
+      cut += cutBand * crackEnvelope * event.gain * 0.14;
+    }
+
+    samples[index] += cut;
+  }
+}
+
 function render(duration, draw, targetPeak) {
   const samples = new Float64Array(Math.ceil(duration * SAMPLE_RATE));
   draw(samples);
@@ -175,7 +273,7 @@ function makeStart() {
 }
 
 function makeCut(name, cents) {
-  return render(0.1, (samples) => addWoodTick(samples, name, cents, 1), 0.45);
+  return render(0.21, (samples) => addBlockCut(samples, name, cents), 0.53);
 }
 
 function makePerfect(name, frequency) {
@@ -183,6 +281,13 @@ function makePerfect(name, frequency) {
     addWoodTick(samples, name, -8, 0.34);
     addBell(samples, 0.008, 0.21, frequency, 1);
   }, 0.52);
+}
+
+function makeRisingPerfect(name, semitoneOffset) {
+  return render(0.2, (samples) => {
+    addWoodTick(samples, name, -8, 0.3);
+    addShepardBell(samples, 0.008, 0.19, semitoneOffset, 1);
+  }, 0.42);
 }
 
 function makeEnd() {
@@ -228,13 +333,24 @@ function writeWav(filename, samples) {
 }
 
 fs.mkdirSync(OUTPUT_DIR, { recursive: true });
-writeWav('start', makeStart());
-writeWav('end', makeEnd());
-writeWav('cut-1', makeCut('cut-1', -12));
-writeWav('cut-2', makeCut('cut-2', 0));
-writeWav('cut-3', makeCut('cut-3', 10));
+const perfectOnly = process.argv.includes('--perfect-only');
+let generatedCount = 0;
+
+if (!perfectOnly) {
+  writeWav('start', makeStart());
+  writeWav('end', makeEnd());
+  writeWav('cut-1', makeCut('cut-1', -12));
+  writeWav('cut-2', makeCut('cut-2', 0));
+  writeWav('cut-3', makeCut('cut-3', 10));
+  generatedCount += 5;
+}
 for (const [name, frequency] of PERFECT_NOTES) {
   writeWav(name, makePerfect(name, frequency));
+  generatedCount += 1;
+}
+for (const [name, semitoneOffset] of PERFECT_RISE_NOTES) {
+  writeWav(name, makeRisingPerfect(name, semitoneOffset));
+  generatedCount += 1;
 }
 
-console.log(`Generated ${5 + PERFECT_NOTES.length} original WAV files in ${OUTPUT_DIR}`);
+console.log(`Generated ${generatedCount} original WAV files in ${OUTPUT_DIR}`);

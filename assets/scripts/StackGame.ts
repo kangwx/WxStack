@@ -2,6 +2,7 @@ import {
   _decorator,
   AudioClip,
   AudioSource,
+  Button,
   Color,
   Component,
   EventGamepad,
@@ -36,27 +37,23 @@ const BLOCK_HEIGHT = 44;
 const MOVE_RANGE = 6.1;
 const PERFECT_THRESHOLD = 0.14;
 const STORAGE_KEY = 'wxstack-best-score';
-const CUT_SOUND_NAMES = ['cut-1', 'cut-2', 'cut-3'];
-const PERFECT_TONE_NAMES = [
-  'perfect-01-a4',
-  'perfect-02-b4',
-  'perfect-03-cs5',
-  'perfect-04-e5',
-  'perfect-05-fs5',
-  'perfect-06-a5',
-  'perfect-07-b5',
-  'perfect-08-cs6',
-];
+const NATURAL_MAJOR_INTERVALS = [0, 2, 4, 5, 7, 9, 11] as const;
+const NATURAL_MAJOR_NOTE_NAMES = ['c', 'd', 'e', 'f', 'g', 'a', 'b'] as const;
 
 const COPY = {
   title: '叠叠塔',
   subtitle: '让每一次落点都恰到好处',
   start: '点击屏幕开始',
   loadingAudio: '正在准备音效…',
-  controls: '触屏 · 鼠标 · 空格键 · 手柄确认键',
+  controls: '触屏 · 鼠标 · 空格键 · T 键测试 · 手柄确认键',
   precision: '连续精准落点可触发完美连击',
   best: '最高分',
   perfect: '完美',
+  perfectTest: '完美测试',
+  testOn: '开',
+  testOff: '关',
+  testing: '测试中',
+  testScore: '测试成绩 · 不计最高分',
   gameOver: '塔止于此',
   restart: '点击任意处重新开始',
   newBest: '新纪录',
@@ -87,21 +84,36 @@ interface FallingPiece extends StackBlock {
 interface Spark {
   x: number;
   y: number;
+  cameraYAtSpawn: number;
   vx: number;
   vy: number;
   life: number;
   maxLife: number;
   size: number;
+  trailLength: number;
   color: Color;
 }
 
 interface ImpactRing {
-  x: number;
-  y: number;
+  worldX: number;
+  worldZ: number;
+  level: number;
   life: number;
   maxLife: number;
   radius: number;
   color: Color;
+}
+
+interface PerfectFrame {
+  block: StackBlock;
+  elapsed: number;
+  delay: number;
+  duration: number;
+  startExpansion: number;
+  maxExpansion: number;
+  alpha: number;
+  fillAlpha: number;
+  lineWidth: number;
 }
 
 interface Point2 {
@@ -117,12 +129,17 @@ export class StackGame extends Component {
   private hudSafeRoot!: Node;
   private scoreLabel!: Label;
   private bestLabel!: Label;
+  private testModeBadgeLabel!: Label;
   private perfectLabel!: Label;
   private startPromptLabel!: Label;
   private controlsLabel!: Label;
   private precisionTipLabel!: Label;
   private perfectOpacity!: UIOpacity;
   private startGroup!: Node;
+  private testModeToggle!: Node;
+  private testModeToggleGraphics!: Graphics;
+  private testModeToggleLabel!: Label;
+  private testModeStatusLabel!: Label;
   private resultGroup!: Node;
   private resultTitleLabel!: Label;
   private resultScoreLabel!: Label;
@@ -134,10 +151,13 @@ export class StackGame extends Component {
   private fallingPieces: FallingPiece[] = [];
   private sparks: Spark[] = [];
   private rings: ImpactRing[] = [];
+  private perfectFrames: PerfectFrame[] = [];
 
   private score = 0;
   private bestScore = 0;
   private perfectStreak = 0;
+  private perfectToneStep = 0;
+  private testModeEnabled = false;
   private moveAxis: MoveAxis = 'x';
   private moveDirection = 1;
   private moveSpeed = 6.4;
@@ -163,6 +183,7 @@ export class StackGame extends Component {
   private heldKeys = new Set<KeyCode>();
   private gamepadSouthHeld = false;
   private gamepadOptionsHeld = false;
+  private gamepadNorthHeld = false;
   private reducedMotion = false;
   private audioReady = false;
 
@@ -177,8 +198,8 @@ export class StackGame extends Component {
   }
 
   onEnable(): void {
-    input.on(Input.EventType.TOUCH_END, this.onPointerAction, this);
-    input.on(Input.EventType.MOUSE_UP, this.onPointerAction, this);
+    this.graphics.node.on(Node.EventType.TOUCH_END, this.onPointerAction, this);
+    this.testModeToggle.on(Button.EventType.CLICK, this.onTestModeToggle, this);
     input.on(Input.EventType.KEY_DOWN, this.onKeyDown, this);
     input.on(Input.EventType.KEY_UP, this.onKeyUp, this);
     input.on(Input.EventType.GAMEPAD_INPUT, this.onGamepadInput, this);
@@ -187,8 +208,8 @@ export class StackGame extends Component {
   }
 
   onDisable(): void {
-    input.off(Input.EventType.TOUCH_END, this.onPointerAction, this);
-    input.off(Input.EventType.MOUSE_UP, this.onPointerAction, this);
+    this.graphics.node.off(Node.EventType.TOUCH_END, this.onPointerAction, this);
+    this.testModeToggle.off(Button.EventType.CLICK, this.onTestModeToggle, this);
     input.off(Input.EventType.KEY_DOWN, this.onKeyDown, this);
     input.off(Input.EventType.KEY_UP, this.onKeyUp, this);
     input.off(Input.EventType.GAMEPAD_INPUT, this.onGamepadInput, this);
@@ -197,6 +218,7 @@ export class StackGame extends Component {
     this.heldKeys.clear();
     this.gamepadSouthHeld = false;
     this.gamepadOptionsHeld = false;
+    this.gamepadNorthHeld = false;
   }
 
   update(dt: number): void {
@@ -267,12 +289,17 @@ export class StackGame extends Component {
     this.bestLabel.lineHeight = 30;
     this.anchorTopRight(this.bestLabel.node, 34, 32);
 
+    this.testModeBadgeLabel = this.makeLabel('TestModeBadge', this.hudSafeRoot, COPY.testing, 24, new Color(255, 255, 255, 235), 132, 52);
+    this.anchorTopLeft(this.testModeBadgeLabel.node, 34, 32);
+    this.testModeBadgeLabel.node.active = false;
+
     this.perfectLabel = this.makeLabel('Perfect', this.hudSafeRoot, COPY.perfect, 42, new Color(255, 255, 255, 255), 420, 72);
     this.anchorCenter(this.perfectLabel.node, 0, 248);
     this.perfectOpacity = this.perfectLabel.node.addComponent(UIOpacity);
     this.perfectOpacity.opacity = 0;
 
     this.startGroup = this.makeFullNode('StartScreen', this.hudSafeRoot);
+    this.buildTestModeToggle();
     this.makeCenteredLabel('Title', this.startGroup, COPY.title, 104, 214, 500, 130, new Color(255, 255, 255, 255));
     this.makeCenteredLabel('Subtitle', this.startGroup, COPY.subtitle, 30, 120, 620, 66, new Color(255, 255, 255, 225));
     this.startPromptLabel = this.makeCenteredLabel('StartPrompt', this.startGroup, this.audioReady ? COPY.start : COPY.loadingAudio, 38, -48, 560, 84, new Color(255, 255, 255, 255));
@@ -287,16 +314,85 @@ export class StackGame extends Component {
     this.resultGroup.active = false;
   }
 
+  private buildTestModeToggle(): void {
+    this.testModeToggle = this.makeNode('TestModeToggle', this.startGroup);
+    this.testModeToggle.addComponent(UITransform).setContentSize(300, 96);
+    this.anchorTopLeft(this.testModeToggle, 28, 28);
+    this.testModeToggleGraphics = this.testModeToggle.addComponent(Graphics);
+    const button = this.testModeToggle.addComponent(Button);
+    button.transition = Button.Transition.NONE;
+
+    this.testModeToggleLabel = this.makeLabel(
+      'TestModeLabel',
+      this.testModeToggle,
+      COPY.perfectTest,
+      28,
+      new Color(255, 255, 255, 185),
+      150,
+      64,
+    );
+    this.testModeToggleLabel.node.setPosition(-55, 0, 0);
+
+    this.testModeStatusLabel = this.makeLabel(
+      'TestModeStatus',
+      this.testModeToggle,
+      COPY.testOff,
+      18,
+      new Color(255, 255, 255, 205),
+      32,
+      40,
+    );
+    this.updateTestModeUI();
+  }
+
+  private updateTestModeUI(): void {
+    const g = this.testModeToggleGraphics;
+    g.clear();
+    g.fillColor = this.testModeEnabled
+      ? new Color(7, 45, 54, 164)
+      : new Color(7, 31, 43, 108);
+    g.roundRect(-138, -36, 276, 72, 36);
+    g.fill();
+    g.strokeColor = new Color(255, 255, 255, this.testModeEnabled ? 112 : 76);
+    g.lineWidth = 2;
+    g.roundRect(-138, -36, 276, 72, 36);
+    g.stroke();
+
+    g.fillColor = this.testModeEnabled
+      ? new Color(255, 255, 255, 218)
+      : new Color(255, 255, 255, 46);
+    g.roundRect(40, -24, 92, 48, 24);
+    g.fill();
+
+    const knobX = this.testModeEnabled ? 108 : 64;
+    g.fillColor = this.testModeEnabled
+      ? new Color(24, 82, 92, 255)
+      : new Color(255, 255, 255, 220);
+    g.circle(knobX, 0, 18);
+    g.fill();
+
+    this.testModeToggleLabel.color = new Color(255, 255, 255, this.testModeEnabled ? 255 : 185);
+    this.testModeStatusLabel.string = this.testModeEnabled ? COPY.testOn : COPY.testOff;
+    this.testModeStatusLabel.color = this.testModeEnabled
+      ? new Color(18, 66, 76, 255)
+      : new Color(255, 255, 255, 205);
+    this.testModeStatusLabel.node.setPosition(this.testModeEnabled ? 64 : 108, 0, 0);
+    this.testModeBadgeLabel.node.active = this.testModeEnabled && this.phase !== 'ready';
+  }
+
   private showReadyScreen(): void {
     this.phase = 'ready';
+    this.updateTestModeUI();
+    this.resetPerfectFeedback();
     this.score = 0;
-    this.perfectStreak = 0;
+    this.resetPerfectChain();
     this.cameraY = 0;
     this.targetCameraY = 0;
     this.current = null;
     this.fallingPieces = [];
     this.sparks = [];
     this.rings = [];
+    this.perfectFrames = [];
     this.stack = [];
 
     for (let level = 0; level < 5; level += 1) {
@@ -325,9 +421,11 @@ export class StackGame extends Component {
       return;
     }
     Tween.stopAllByTarget(this.resultGroup);
+    this.resetPerfectFeedback();
     this.phase = 'playing';
+    this.updateTestModeUI();
     this.score = 0;
-    this.perfectStreak = 0;
+    this.resetPerfectChain();
     this.moveSpeed = 6.4;
     this.cameraY = 0;
     this.targetCameraY = 0;
@@ -338,6 +436,7 @@ export class StackGame extends Component {
     this.fallingPieces = [];
     this.sparks = [];
     this.rings = [];
+    this.perfectFrames = [];
     this.stack = [{ x: 0, z: 0, width: BASE_SIZE, depth: BASE_SIZE, level: 0, hue: this.hueForLevel(0) }];
     this.current = null;
 
@@ -418,7 +517,8 @@ export class StackGame extends Component {
       return;
     }
 
-    const isPerfect = Math.abs(delta) <= Math.min(PERFECT_THRESHOLD, currentSize * 0.045);
+    const isPerfect = this.testModeEnabled
+      || Math.abs(delta) <= Math.min(PERFECT_THRESHOLD, currentSize * 0.045);
     if (isPerfect) {
       if (this.moveAxis === 'x') {
         placed.x = previous.x;
@@ -428,7 +528,7 @@ export class StackGame extends Component {
       this.perfectStreak += 1;
       this.handlePerfectPlacement(placed);
     } else {
-      this.perfectStreak = 0;
+      this.resetPerfectChain();
       this.trimBlockAndCreateFragment(placed, previous, delta);
       this.addTrauma(0.2);
       this.spawnImpactFx(placed, false);
@@ -492,10 +592,19 @@ export class StackGame extends Component {
   }
 
   private handlePerfectPlacement(placed: StackBlock): void {
+    const energy = this.perfectFeedbackEnergy(this.perfectStreak);
     this.playPerfectTone();
-    this.addTrauma(this.perfectStreak >= 3 ? 0.32 : 0.16);
-    this.flashAlpha = this.reducedMotion ? 0 : Math.min(0.24, 0.1 + this.perfectStreak * 0.025);
-    this.spawnImpactFx(placed, true);
+    this.addTrauma(
+      Math.min(0.38, 0.13 + energy * 0.055),
+      Math.min(0.62, 0.44 + energy * 0.03),
+    );
+    this.flashAlpha = this.reducedMotion
+      ? 0
+      : Math.min(0.11, 0.018 + (energy - 1) * 0.018);
+    if (!this.reducedMotion) {
+      this.spawnImpactFx(placed, true, this.perfectStreak);
+    }
+    this.spawnPerfectFrames(placed, this.perfectStreak);
     this.showPerfectText();
   }
 
@@ -516,7 +625,9 @@ export class StackGame extends Component {
     this.phase = 'falling';
     this.resultDelay = this.reducedMotion ? 0.35 : 0.68;
     this.restartLock = this.resultDelay + 0.25;
-    this.perfectStreak = 0;
+    this.resetPerfectChain();
+    this.perfectFrames = [];
+    this.resetPerfectFeedback();
     this.addTrauma(0.72);
     this.flashAlpha = this.reducedMotion ? 0 : 0.28;
     this.playSound('end', 0.82);
@@ -525,7 +636,7 @@ export class StackGame extends Component {
   private showResultScreen(): void {
     this.phase = 'gameover';
     let newBest = false;
-    if (this.score > this.bestScore) {
+    if (!this.testModeEnabled && this.score > this.bestScore) {
       this.bestScore = this.score;
       newBest = true;
       this.saveBestScore();
@@ -534,7 +645,10 @@ export class StackGame extends Component {
     this.updateBestLabel();
     this.resultTitleLabel.string = newBest ? COPY.newBest : COPY.gameOver;
     this.resultScoreLabel.string = `${this.score}`;
-    this.resultBestLabel.string = `${COPY.best}  ${this.bestScore}`;
+    this.resultBestLabel.string = this.testModeEnabled
+      ? `${COPY.testScore}\n${COPY.best}  ${this.bestScore}`
+      : `${COPY.best}  ${this.bestScore}`;
+    this.resultBestLabel.lineHeight = this.testModeEnabled ? 32 : 34;
     this.resultGroup.active = true;
     this.resultGroup.setScale(0.86, 0.86, 1);
     tween(this.resultGroup)
@@ -557,7 +671,17 @@ export class StackGame extends Component {
       .start();
   }
 
+  private resetPerfectFeedback(): void {
+    Tween.stopAllByTarget(this.perfectOpacity);
+    Tween.stopAllByTarget(this.perfectLabel.node);
+    this.perfectOpacity.opacity = 0;
+    this.perfectLabel.node.setScale(1, 1, 1);
+    this.perfectLabel.node.setPosition(0, 248, 0);
+  }
+
   private showPerfectText(): void {
+    const energy = this.perfectFeedbackEnergy(this.perfectStreak);
+    const peakScale = this.reducedMotion ? 1 : 1 + Math.min(0.22, (energy - 1) * 0.048);
     Tween.stopAllByTarget(this.perfectOpacity);
     Tween.stopAllByTarget(this.perfectLabel.node);
     this.perfectLabel.string = this.perfectStreak > 1 ? `${COPY.perfect}  ×${this.perfectStreak}` : COPY.perfect;
@@ -566,7 +690,12 @@ export class StackGame extends Component {
     this.perfectLabel.node.setPosition(0, 228, 0);
 
     tween(this.perfectLabel.node)
-      .to(this.reducedMotion ? 0.01 : 0.22, { scale: new Vec3(1, 1, 1), position: new Vec3(0, 248, 0) }, { easing: 'backOut' })
+      .to(
+        this.reducedMotion ? 0.01 : 0.18,
+        { scale: new Vec3(peakScale, peakScale, 1), position: new Vec3(0, 248, 0) },
+        { easing: 'backOut' },
+      )
+      .to(this.reducedMotion ? 0.01 : 0.12, { scale: new Vec3(1, 1, 1) }, { easing: 'quadOut' })
       .start();
     tween(this.perfectOpacity)
       .delay(this.reducedMotion ? 0.25 : 0.48)
@@ -574,32 +703,104 @@ export class StackGame extends Component {
       .start();
   }
 
-  private spawnImpactFx(block: StackBlock, perfect: boolean): void {
-    const center = this.project(block.x, block.z, block.level + 1);
-    const amount = perfect ? 18 : 8;
+  private spawnImpactFx(block: StackBlock, perfect: boolean, intensity = 1): void {
+    const center = this.projectWithoutShake(block.x, block.z, block.level + 1);
+    const streak = Math.max(1, intensity);
+    const energy = this.perfectFeedbackEnergy(streak);
+    const amount = perfect ? Math.min(88, Math.round(17 + streak * 4 + energy * 4)) : 8;
+    const accentColor = new Color(255, 238, 166, 255);
     for (let index = 0; index < amount; index += 1) {
       const angle = (Math.PI * 2 * index) / amount + Math.random() * 0.28;
-      const speed = (perfect ? 95 : 58) + Math.random() * (perfect ? 85 : 45);
+      const isFastSpark = perfect && index % 5 === 0;
+      const baseSpeed = perfect
+        ? 96 + energy * 15 + Math.random() * (72 + energy * 16)
+        : 58 + Math.random() * 45;
+      const speed = baseSpeed * (isFastSpark ? 1.3 : 1);
+      const perfectLife = Math.min(0.72, 0.45 + (energy - 1) * 0.065);
+      const sparkLife = perfectLife * (isFastSpark ? 0.72 : 1);
+      const hasTrail = perfect && (isFastSpark || index % 3 === 0);
       this.sparks.push({
         x: center.x,
         y: center.y,
+        cameraYAtSpawn: this.cameraY,
         vx: Math.cos(angle) * speed,
         vy: Math.sin(angle) * speed + 30,
-        life: perfect ? 0.72 : 0.48,
-        maxLife: perfect ? 0.72 : 0.48,
-        size: perfect ? 3 + Math.random() * 4 : 2 + Math.random() * 3,
-        color: perfect ? new Color(255, 255, 255, 255) : this.hslToColor(block.hue + 18, 82, 74),
+        life: perfect ? sparkLife : 0.48,
+        maxLife: perfect ? sparkLife : 0.48,
+        size: perfect
+          ? (isFastSpark
+            ? 2.4 + Math.random() * (2 + energy * 0.36)
+            : 3.2 + Math.random() * (3.4 + energy * 0.78))
+          : 2 + Math.random() * 3,
+        trailLength: hasTrail
+          ? (isFastSpark ? 14 + energy * 4 : 8 + energy * 3) + Math.random() * 5
+          : 0,
+        color: perfect
+          ? (!isFastSpark && streak >= 3 && index % 4 === 0
+            ? accentColor
+            : new Color(255, 255, 255, 255))
+          : this.hslToColor(block.hue + 18, 82, 74),
       });
     }
 
-    this.rings.push({
-      x: center.x,
-      y: center.y,
-      life: perfect ? 0.48 : 0.3,
-      maxLife: perfect ? 0.48 : 0.3,
-      radius: perfect ? 18 : 10,
-      color: perfect ? new Color(255, 255, 255, 220) : this.hslToColor(block.hue, 78, 80),
-    });
+    if (this.sparks.length > 128) {
+      this.sparks.splice(0, this.sparks.length - 128);
+    }
+
+    if (!perfect) {
+      this.rings.push({
+        worldX: block.x,
+        worldZ: block.z,
+        level: block.level + 1,
+        life: 0.3,
+        maxLife: 0.3,
+        radius: 10,
+        color: this.hslToColor(block.hue, 78, 80),
+      });
+    }
+  }
+
+  private spawnPerfectFrames(block: StackBlock, intensity: number): void {
+    const streak = Math.max(1, intensity);
+    const energy = this.perfectFeedbackEnergy(streak);
+    const waveCount = this.reducedMotion
+      ? 1
+      : Math.min(6, Math.max(1, Math.ceil(Math.log2(streak + 1))));
+    const primaryAlpha = this.reducedMotion
+      ? Math.min(220, 140 + (energy - 1) * 18)
+      : Math.min(255, 164 + (energy - 1) * 25);
+
+    for (let wave = 0; wave < waveCount; wave += 1) {
+      const waveFade = Math.pow(0.72, wave);
+      this.perfectFrames.push({
+        block: { ...block },
+        elapsed: 0,
+        delay: this.reducedMotion ? 0 : wave * 0.045,
+        duration: this.reducedMotion
+          ? 0.24
+          : 0.34 + Math.min(0.16, (energy - 1) * 0.03) + wave * 0.045,
+        startExpansion: this.reducedMotion ? 10 : 5 + wave * 4,
+        maxExpansion: this.reducedMotion ? 10 : 42 + (energy - 1) * 15 + wave * 11,
+        alpha: Math.max(42, primaryAlpha * waveFade),
+        fillAlpha: wave === 0
+          ? Math.min(
+            this.reducedMotion ? 54 : 76,
+            (this.reducedMotion ? 14 : 18) + (energy - 1) * (this.reducedMotion ? 10 : 16),
+          )
+          : 0,
+        lineWidth: this.reducedMotion
+          ? Math.min(5, 2.5 + (energy - 1) * 0.35)
+          : Math.max(1.7, 2.8 + Math.min(2.2, (energy - 1) * 0.48) - wave * 0.16),
+      });
+    }
+
+    if (this.perfectFrames.length > 12) {
+      this.perfectFrames.splice(0, this.perfectFrames.length - 12);
+    }
+  }
+
+  private perfectFeedbackEnergy(streak: number): number {
+    return 1 + Math.log2(Math.max(1, streak));
   }
 
   private updateParticles(dt: number): void {
@@ -617,6 +818,11 @@ export class StackGame extends Component {
       ring.radius += dt * 190;
     }
     this.rings = this.rings.filter((ring) => ring.life > 0);
+
+    for (const frame of this.perfectFrames) {
+      frame.elapsed += dt;
+    }
+    this.perfectFrames = this.perfectFrames.filter((frame) => frame.elapsed < frame.delay + frame.duration);
   }
 
   private updateFallingPieces(dt: number): void {
@@ -637,11 +843,11 @@ export class StackGame extends Component {
     this.cameraY += (this.targetCameraY - this.cameraY) * follow;
   }
 
-  private addTrauma(amount: number): void {
+  private addTrauma(amount: number, cap = 1): void {
     if (this.reducedMotion) {
       return;
     }
-    this.trauma = Math.min(1, this.trauma + amount);
+    this.trauma = Math.min(cap, this.trauma + amount);
   }
 
   private updateShake(dt: number): void {
@@ -777,19 +983,79 @@ export class StackGame extends Component {
   }
 
   private drawEffects(g: Graphics): void {
+    for (const frame of this.perfectFrames) {
+      if (frame.elapsed < frame.delay) {
+        continue;
+      }
+      const progress = Math.min(1, (frame.elapsed - frame.delay) / frame.duration);
+      const eased = 1 - Math.pow(1 - progress, 3);
+      const fadeIn = Math.min(1, (frame.elapsed - frame.delay) / 0.035);
+      const fade = fadeIn * Math.pow(1 - progress, 1.18);
+      const center = this.project(frame.block.x, frame.block.z, frame.block.level + 1);
+      const baseHalfWidth = (frame.block.width + frame.block.depth) * this.isoX * 0.5;
+      const horizontalRoom = Math.max(0, this.visibleWidth * 0.5 - 32 - Math.abs(center.x) - baseHalfWidth);
+      const maxExpansion = Math.min(frame.maxExpansion, horizontalRoom);
+      const startExpansion = Math.min(frame.startExpansion, maxExpansion);
+      const expansionPixels = startExpansion + (maxExpansion - startExpansion) * eased;
+      const expansion = expansionPixels / Math.max(1, this.isoX);
+      const outline: StackBlock = {
+        ...frame.block,
+        width: frame.block.width + expansion,
+        depth: frame.block.depth + expansion,
+        level: frame.block.level + 0.035,
+      };
+      const points = this.topPoints(outline);
+      if (frame.fillAlpha > 0) {
+        const fillFade = fadeIn * Math.pow(1 - progress, 4);
+        this.fillPolygon(
+          g,
+          points,
+          new Color(255, 255, 255, Math.round(frame.fillAlpha * fillFade)),
+        );
+      }
+      g.strokeColor = new Color(255, 255, 255, Math.round(frame.alpha * fade));
+      g.lineWidth = frame.lineWidth;
+      g.moveTo(points[0].x, points[0].y);
+      for (let index = 1; index < points.length; index += 1) {
+        g.lineTo(points[index].x, points[index].y);
+      }
+      g.close();
+      g.stroke();
+    }
+
     for (const ring of this.rings) {
       const ratio = Math.max(0, ring.life / ring.maxLife);
+      const center = this.project(ring.worldX, ring.worldZ, ring.level);
       g.strokeColor = new Color(ring.color.r, ring.color.g, ring.color.b, Math.round(ring.color.a * ratio));
       g.lineWidth = 1 + ratio * 2.5;
-      g.circle(ring.x + this.shakeX, ring.y + this.shakeY, ring.radius);
+      g.circle(center.x, center.y, ring.radius);
       g.stroke();
     }
 
     for (const spark of this.sparks) {
       const ratio = Math.max(0, spark.life / spark.maxLife);
-      g.fillColor = new Color(spark.color.r, spark.color.g, spark.color.b, Math.round(255 * ratio));
-      const size = Math.max(0.7, spark.size * ratio);
-      g.rect(spark.x - size * 0.5 + this.shakeX, spark.y - size * 0.5 + this.shakeY, size, size);
+      const visibility = Math.pow(ratio, 0.65);
+      const alpha = Math.round(255 * visibility);
+      g.fillColor = new Color(spark.color.r, spark.color.g, spark.color.b, alpha);
+      const size = Math.max(0.9, spark.size * (0.42 + ratio * 0.58));
+      const cameraOffset = this.cameraY - spark.cameraYAtSpawn;
+      const x = spark.x + this.shakeX;
+      const y = spark.y + cameraOffset + this.shakeY;
+      if (spark.trailLength > 0) {
+        const speed = Math.max(1, Math.hypot(spark.vx, spark.vy));
+        const trail = spark.trailLength * visibility;
+        g.strokeColor = new Color(spark.color.r, spark.color.g, spark.color.b, Math.round(alpha * 0.72));
+        g.lineWidth = Math.max(1, size * 0.58);
+        g.moveTo(x - (spark.vx / speed) * trail, y - (spark.vy / speed) * trail);
+        g.lineTo(x, y);
+        g.stroke();
+      }
+      g.rect(
+        x - size * 0.5,
+        y - size * 0.5,
+        size,
+        size,
+      );
       g.fill();
     }
   }
@@ -833,10 +1099,18 @@ export class StackGame extends Component {
     ];
   }
 
-  private project(x: number, z: number, level: number): Point2 {
+  private projectWithoutShake(x: number, z: number, level: number): Point2 {
     return {
-      x: (x - z) * this.isoX + this.shakeX,
-      y: this.worldOriginY + (x + z) * this.isoY + level * BLOCK_HEIGHT + this.cameraY + this.shakeY,
+      x: (x - z) * this.isoX,
+      y: this.worldOriginY + (x + z) * this.isoY + level * BLOCK_HEIGHT + this.cameraY,
+    };
+  }
+
+  private project(x: number, z: number, level: number): Point2 {
+    const point = this.projectWithoutShake(x, z, level);
+    return {
+      x: point.x + this.shakeX,
+      y: point.y + this.shakeY,
     };
   }
 
@@ -897,29 +1171,48 @@ export class StackGame extends Component {
   }
 
   private playCutSound(): void {
-    const name = CUT_SOUND_NAMES[this.score % CUT_SOUND_NAMES.length];
-    this.playSound(name, 0.65);
+    this.playSound('cut-2', 0.65);
   }
 
   private playPerfectTone(): void {
-    const noteIndex = Math.min(PERFECT_TONE_NAMES.length - 1, Math.max(0, this.perfectStreak - 1));
-    this.playSound(PERFECT_TONE_NAMES[noteIndex], 0.82);
+    const step = this.perfectToneStep;
+    const degree = step % NATURAL_MAJOR_INTERVALS.length;
+    const noteName = NATURAL_MAJOR_NOTE_NAMES[degree];
+    const clipName = step < NATURAL_MAJOR_INTERVALS.length
+      ? `perfect-major-${noteName}5`
+      : `perfect-rise-${noteName}`;
+
+    // Advance from the gameplay event, even when audio is muted or a clip failed to load.
+    this.perfectToneStep += 1;
+    this.playSound(clipName, step < NATURAL_MAJOR_INTERVALS.length ? 0.82 : 0.76);
+  }
+
+  private resetPerfectChain(): void {
+    this.perfectStreak = 0;
+    this.perfectToneStep = 0;
   }
 
   private onPointerAction(): void {
     this.tryPrimaryAction();
   }
 
+  private onTestModeToggle(): void {
+    this.toggleTestMode();
+  }
+
   private onKeyDown(event: EventKeyboard): void {
     const isActionKey = event.keyCode === KeyCode.SPACE
       || event.keyCode === KeyCode.ENTER
-      || event.keyCode === KeyCode.KEY_R;
+      || event.keyCode === KeyCode.KEY_R
+      || event.keyCode === KeyCode.KEY_T;
     if (!isActionKey || this.heldKeys.has(event.keyCode)) {
       return;
     }
     this.heldKeys.add(event.keyCode);
 
-    if (event.keyCode === KeyCode.SPACE) {
+    if (event.keyCode === KeyCode.KEY_T) {
+      this.toggleTestMode();
+    } else if (event.keyCode === KeyCode.SPACE) {
       this.tryPrimaryAction();
     } else if (event.keyCode === KeyCode.ENTER) {
       this.tryContinueAction();
@@ -935,14 +1228,40 @@ export class StackGame extends Component {
   private onGamepadInput(event: EventGamepad): void {
     const southPressed = event.gamepad.buttonSouth.getValue() > 0.55;
     const optionsPressed = event.gamepad.buttonOptions.getValue() > 0.55;
-    if (southPressed && !this.gamepadSouthHeld) {
-      this.tryPrimaryAction();
-    }
-    if (optionsPressed && !this.gamepadOptionsHeld) {
-      this.tryContinueAction();
-    }
+    const northPressed = event.gamepad.buttonNorth.getValue() > 0.55;
+    const northJustPressed = northPressed && !this.gamepadNorthHeld;
+    const southJustPressed = southPressed && !this.gamepadSouthHeld;
+    const optionsJustPressed = optionsPressed && !this.gamepadOptionsHeld;
     this.gamepadSouthHeld = southPressed;
     this.gamepadOptionsHeld = optionsPressed;
+    this.gamepadNorthHeld = northPressed;
+
+    if (northJustPressed) {
+      this.toggleTestMode();
+      return;
+    }
+    if (southJustPressed) {
+      this.tryPrimaryAction();
+    }
+    if (optionsJustPressed) {
+      this.tryContinueAction();
+    }
+  }
+
+  private toggleTestMode(): void {
+    if (this.phase !== 'ready') {
+      return;
+    }
+    this.testModeEnabled = !this.testModeEnabled;
+    this.resetPerfectChain();
+    this.resetPerfectFeedback();
+    this.updateTestModeUI();
+
+    Tween.stopAllByTarget(this.testModeToggle);
+    this.testModeToggle.setScale(0.98, 0.98, 1);
+    tween(this.testModeToggle)
+      .to(this.reducedMotion ? 0.01 : 0.12, { scale: new Vec3(1, 1, 1) }, { easing: 'quadOut' })
+      .start();
   }
 
   private consumeActionDebounce(): boolean {
@@ -1162,6 +1481,14 @@ export class StackGame extends Component {
     widget.isAlignRight = true;
     widget.top = top;
     widget.right = right;
+  }
+
+  private anchorTopLeft(node: Node, top: number, left: number): void {
+    const widget = node.addComponent(Widget);
+    widget.isAlignTop = true;
+    widget.isAlignLeft = true;
+    widget.top = top;
+    widget.left = left;
   }
 
   private anchorCenter(node: Node, horizontalCenter: number, verticalCenter: number): void {
