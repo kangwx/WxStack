@@ -24,7 +24,7 @@
             "_value": false
           },
           "3d": {
-            "_value": false
+            "_value": true
           },
           "meshopt": {
             "_value": false
@@ -57,11 +57,11 @@
             "_value": false
           },
           "physics": {
-            "_value": false,
+            "_value": true,
             "_option": "physics-ammo"
           },
           "physics-ammo": {
-            "_value": false,
+            "_value": true,
             "_flags": {
               "LOAD_BULLET_MANUALLY": false
             }
@@ -101,7 +101,7 @@
             "_value": true
           },
           "primitive": {
-            "_value": false
+            "_value": true
           },
           "profiler": {
             "_value": true
@@ -192,6 +192,7 @@
         },
         "includeModules": [
           "2d",
+          "3d",
           "affine-transform",
           "animation",
           "audio",
@@ -201,6 +202,8 @@
           "gfx-webgl2",
           "graphics",
           "intersection-2d",
+          "physics-ammo",
+          "primitive",
           "profiler",
           "tween",
           "ui"

@@ -33,6 +33,7 @@ import {
   view,
   Widget,
 } from 'cc';
+import { StackWorld3D, StackWorldTheme } from './StackWorld3D';
 
 const { ccclass } = _decorator;
 
@@ -40,6 +41,7 @@ const DESIGN_WIDTH = 750;
 const DESIGN_HEIGHT = 1334;
 const BASE_SIZE = 5;
 const BLOCK_HEIGHT = 44;
+const BLOCK_3D_HEIGHT = 0.62;
 const MOVE_RANGE = 6.1;
 const PERFECT_THRESHOLD = 0.14;
 const INITIAL_COINS = 100;
@@ -58,7 +60,7 @@ const COPY = {
   subtitle: '让每一次落点都恰到好处',
   start: '点击屏幕开始',
   loadingAudio: '正在准备音效…',
-  controls: '空格落块 · P / Esc 暂停 · S 设置 · K 皮肤 · T 测试',
+  controls: '点击 / 空格释放方块 · P / Esc 暂停 · S 设置 · K 皮肤 · T 测试',
   precision: '连续精准落点可触发完美连击',
   best: '最高分',
   perfect: '完美',
@@ -96,7 +98,7 @@ const COPY = {
   newBest: '新纪录',
 };
 
-type GamePhase = 'ready' | 'playing' | 'paused' | 'falling' | 'gameover';
+type GamePhase = 'ready' | 'playing' | 'dropping' | 'paused' | 'falling' | 'gameover';
 type MoveAxis = 'x' | 'z';
 const SKIN_IDS = ['classic', 'cyber-neon', 'porcelain-moon', 'pastel-toy', 'nature-zen'] as const;
 type SkinId = typeof SKIN_IDS[number];
@@ -347,6 +349,7 @@ interface NatureTextureBlock {
 
 @ccclass('StackGame')
 export class StackGame extends Component {
+  private world3D!: StackWorld3D;
   private graphics!: Graphics;
   private effectsGraphics!: Graphics;
   private backgroundNode!: Node;
@@ -438,6 +441,7 @@ export class StackGame extends Component {
   private restartLock = 0;
   private resumeInputLock = 0;
   private pauseSelection = 0;
+  private phaseBeforePause: 'playing' | 'dropping' = 'playing';
   private homeOverlay: HomeOverlay = 'none';
   private settingsSelection = 0;
   private skinSelection = 0;
@@ -540,6 +544,10 @@ export class StackGame extends Component {
     this.gamepadMenuAxisHeld = false;
   }
 
+  onDestroy(): void {
+    this.world3D?.destroy();
+  }
+
   update(dt: number): void {
     const elapsed = Number.isFinite(dt) ? Math.max(0, dt) : 0;
     if (this.phase === 'paused') {
@@ -585,6 +593,20 @@ export class StackGame extends Component {
       simulationRemaining -= step;
     }
 
+    const topBlock = this.current ?? this.stack[this.stack.length - 1];
+    this.world3D.tick(elapsed, topBlock?.level ?? 0, this.shakeX, this.shakeY);
+    if (this.phase === 'dropping' && this.current) {
+      const dropResult = this.world3D.pollDrop(elapsed);
+      if (dropResult === 'landed') {
+        this.resolveCurrentBlockLanding();
+      } else if (dropResult === 'missed') {
+        const previous = this.stack[this.stack.length - 1];
+        const currentCenter = this.moveAxis === 'x' ? this.current.x : this.current.z;
+        const previousCenter = this.moveAxis === 'x' ? previous.x : previous.z;
+        this.failPlacement(this.current, currentCenter - previousCenter);
+      }
+    }
+
     this.flashAlpha = Math.max(0, this.flashAlpha - elapsed * 3.8);
     this.drawFrame();
     this.animatePrompt();
@@ -596,10 +618,13 @@ export class StackGame extends Component {
       this.node.addComponent(UITransform);
     }
 
+    this.world3D = new StackWorld3D(this.node, BLOCK_3D_HEIGHT);
+
     this.backgroundNode = this.makeNode('ThemeBackground', this.node);
     this.backgroundNode.addComponent(UITransform).setContentSize(DESIGN_WIDTH, DESIGN_HEIGHT);
     this.backgroundSprite = this.backgroundNode.addComponent(Sprite);
     this.backgroundSprite.sizeMode = Sprite.SizeMode.CUSTOM;
+    this.backgroundNode.active = false;
 
     const graphicsNode = this.makeNode('StackRenderer', this.node);
     graphicsNode.addComponent(UITransform).setContentSize(DESIGN_WIDTH, DESIGN_HEIGHT);
@@ -1095,6 +1120,8 @@ export class StackGame extends Component {
 
   private showReadyScreen(): void {
     this.phase = 'ready';
+    this.phaseBeforePause = 'playing';
+    this.world3D.reset();
     this.homeOverlay = 'none';
     this.updateTestModeUI();
     this.resetPerfectFeedback();
@@ -1163,7 +1190,9 @@ export class StackGame extends Component {
     Tween.stopAllByTarget(this.scoreLabel.node);
     this.scoreLabel.node.setScale(1, 1, 1);
     this.resetPerfectFeedback();
+    this.world3D.reset();
     this.phase = 'playing';
+    this.phaseBeforePause = 'playing';
     this.updateTestModeUI();
     this.score = 0;
     this.roundPerfectCount = 0;
@@ -1252,7 +1281,16 @@ export class StackGame extends Component {
   }
 
   private placeCurrentBlock(): void {
-    if (!this.current || this.spawnDelay > 0) {
+    if (!this.current || this.spawnDelay > 0 || this.phase !== 'playing') {
+      return;
+    }
+
+    this.phase = 'dropping';
+    this.world3D.beginDrop(this.current);
+  }
+
+  private resolveCurrentBlockLanding(): void {
+    if (!this.current || this.phase !== 'dropping') {
       return;
     }
 
@@ -1287,8 +1325,11 @@ export class StackGame extends Component {
       this.playCutSound();
     }
 
+    this.world3D.settle(placed);
+
     this.stack.push(placed);
     this.current = null;
+    this.phase = 'playing';
     this.setScore(this.score + 1, true);
     this.targetCameraY = -Math.max(0, (this.stack.length - 5) * BLOCK_HEIGHT);
     this.spawnDelay = isPerfect ? 0.095 : 0.055;
@@ -1340,6 +1381,7 @@ export class StackGame extends Component {
 
     if (cutSize > 0.015) {
       this.fallingPieces.push(fragment);
+      this.world3D.spawnFragment(fragment, this.moveAxis, delta);
     }
   }
 
@@ -1374,6 +1416,7 @@ export class StackGame extends Component {
       opacity: 255,
     };
     this.fallingPieces.push(miss);
+    this.world3D.releaseMiss(placed, this.moveAxis, delta);
     this.current = null;
     this.phase = 'falling';
     this.pauseButton.active = false;
@@ -1630,59 +1673,10 @@ export class StackGame extends Component {
     const effects = this.effectsGraphics;
     g.clear();
     effects.clear();
-    if (!this.backgroundSprite?.spriteFrame) {
-      this.drawBackground(g);
-    }
-
-    const renderedBlocks: RenderedBlock[] = this.stack.map((block) => ({
-      block,
-      offsetY: 0,
-      rotation: 0,
-      opacity: 255,
-      offsetX: 0,
-    }));
-    if (this.current) {
-      renderedBlocks.push({
-        block: this.current,
-        offsetY: 0,
-        rotation: 0,
-        opacity: 255,
-        offsetX: 0,
-      });
-    }
-    for (const piece of this.fallingPieces) {
-      renderedBlocks.push({
-        block: piece,
-        offsetY: piece.offsetY,
-        rotation: piece.rotation,
-        opacity: Math.max(0, piece.opacity),
-        offsetX: piece.offsetX,
-      });
-    }
-
-    const showNatureHomeTower = this.phase === 'ready'
-      && this.selectedSkinId === 'nature-zen'
-      && !!this.homeTowerPreviewSprite?.spriteFrame;
-    this.homeTowerPreviewNode.active = showNatureHomeTower;
-
-    this.drawTowerShadow(g);
-    if (!showNatureHomeTower) {
-      this.drawGuidePlatform(g);
-      for (const rendered of renderedBlocks) {
-        this.drawBlock(
-          g,
-          rendered.block,
-          rendered.offsetY,
-          rendered.rotation,
-          rendered.opacity,
-          rendered.offsetX,
-        );
-      }
-    }
-
-    const visibleTexturedBlocks = showNatureHomeTower ? [] : renderedBlocks;
-    this.updateNatureTextureBlocks(visibleTexturedBlocks);
-    this.drawNatureTextureEdges(effects, visibleTexturedBlocks);
+    this.backgroundNode.active = false;
+    this.homeTowerPreviewNode.active = false;
+    this.natureTextureRoot.active = false;
+    this.world3D.sync(this.stack, this.current);
     this.drawEffects(effects);
     this.drawOverlay(effects);
     if (this.flashAlpha > 0) {
@@ -2445,11 +2439,13 @@ export class StackGame extends Component {
   }
 
   private pauseGame(): void {
-    if (this.phase !== 'playing') {
+    if (this.phase !== 'playing' && this.phase !== 'dropping') {
       return;
     }
 
+    this.phaseBeforePause = this.phase;
     this.phase = 'paused';
+    this.world3D.setPaused(true);
     this.pauseSelection = 0;
     this.resumeInputLock = 0;
     this.lastActionAt = Date.now();
@@ -2479,7 +2475,8 @@ export class StackGame extends Component {
     Tween.stopAllByTarget(this.pauseGroup);
     this.pauseGroup.active = false;
     this.pauseGroup.setScale(1, 1, 1);
-    this.phase = 'playing';
+    this.phase = this.phaseBeforePause;
+    this.world3D.setPaused(false);
     this.pauseButton.active = true;
     this.resumeInputLock = 0.14;
     this.lastActionAt = Date.now();
@@ -2500,7 +2497,7 @@ export class StackGame extends Component {
   }
 
   private togglePause(): void {
-    if (this.phase === 'playing') {
+    if (this.phase === 'playing' || this.phase === 'dropping') {
       this.pauseGame();
     } else if (this.phase === 'paused') {
       this.resumeGame();
@@ -2680,7 +2677,7 @@ export class StackGame extends Component {
       return;
     }
 
-    if (optionsJustPressed && (this.phase === 'playing' || this.phase === 'paused')) {
+    if (optionsJustPressed && (this.phase === 'playing' || this.phase === 'dropping' || this.phase === 'paused')) {
       this.togglePause();
       return;
     }
@@ -2962,6 +2959,9 @@ export class StackGame extends Component {
             return;
           }
           this.natureMaterialFrames.set(material, frame);
+          if (this.selectedSkinId === 'nature-zen') {
+            this.applyWorld3DTheme();
+          }
           this.drawFrame();
         },
       );
@@ -2973,6 +2973,35 @@ export class StackGame extends Component {
       return;
     }
     this.backgroundSprite.spriteFrame = this.skinBackgrounds.get(this.selectedSkinId) ?? null;
+    this.applyWorld3DTheme();
+  }
+
+  private applyWorld3DTheme(): void {
+    if (!this.world3D) {
+      return;
+    }
+    const skin = this.currentSkin();
+    const blockColors = Array.from({ length: 12 }, (_, level) => (
+      this.blockColorsForSkin(skin, level, 255, this.hueForLevel(level)).top
+    ));
+    const materialTextures = skin.visualStyle === 'nature'
+      ? [
+        this.natureMaterialFrames.get('green-stone'),
+        this.natureMaterialFrames.get('light-wood'),
+        this.natureMaterialFrames.get('walnut'),
+        this.natureMaterialFrames.get('green-stone'),
+        this.natureMaterialFrames.get('light-wood'),
+      ].filter((frame): frame is SpriteFrame => !!frame)
+      : [];
+    const theme: StackWorldTheme = {
+      background: this.skinBackgrounds.get(this.selectedSkinId) ?? null,
+      blockColors,
+      materialTextures,
+      accentColor: this.rgb(skin.accentColor),
+      roughness: skin.visualStyle === 'cyber' ? 0.3 : skin.visualStyle === 'porcelain' ? 0.4 : 0.68,
+      metallic: skin.visualStyle === 'cyber' ? 0.34 : skin.visualStyle === 'porcelain' ? 0.12 : 0.03,
+    };
+    this.world3D.setTheme(theme);
   }
 
   private refreshVisibleSkin(): void {
