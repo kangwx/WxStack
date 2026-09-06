@@ -43,7 +43,16 @@ const BASE_SIZE = 5;
 const BLOCK_HEIGHT = 44;
 const BLOCK_3D_HEIGHT = 0.62;
 const MOVE_RANGE = 6.1;
+const INITIAL_MOVE_SPEED = 5.2;
+const MOVE_SPEED_PER_SCORE = 0.14;
+const MAX_MOVE_SPEED = 9.2;
 const PERFECT_THRESHOLD = 0.14;
+const PERFECT_GROWTH_START_STREAK = 2;
+const PERFECT_GROWTH_STEP = 0.12;
+const PERFECT_GROWTH_MAX_SIZE = BASE_SIZE;
+const CUT_PREVIEW_SECONDS = 0.24;
+const HOME_FADE_OUT_SECONDS = 0.2;
+const HOME_FADE_IN_SECONDS = 0.28;
 const INITIAL_COINS = 100;
 const BEST_SCORE_STORAGE_KEY = 'wxstack-best-score';
 const COIN_STORAGE_KEY = 'wxstack-coins';
@@ -56,7 +65,7 @@ const NATURAL_MAJOR_INTERVALS = [0, 2, 4, 5, 7, 9, 11] as const;
 const NATURAL_MAJOR_NOTE_NAMES = ['c', 'd', 'e', 'f', 'g', 'a', 'b'] as const;
 
 const COPY = {
-  title: '叠叠塔',
+  title: '叠个正着',
   subtitle: '让每一次落点都恰到好处',
   start: '点击屏幕开始',
   loadingAudio: '正在准备音效…',
@@ -94,15 +103,17 @@ const COPY = {
   home: '返回首页',
   pauseControls: '方向键选择 · 回车确认 · R 重新开始 · P / Esc 继续',
   gameOver: '塔止于此',
-  restart: '点击任意处重新开始',
+  restart: '方向键选择 · 回车确认 · Esc 返回首页',
   newBest: '新纪录',
 };
 
 type GamePhase = 'ready' | 'playing' | 'dropping' | 'paused' | 'falling' | 'gameover';
 type MoveAxis = 'x' | 'z';
-const SKIN_IDS = ['classic', 'cyber-neon', 'porcelain-moon', 'pastel-toy', 'nature-zen'] as const;
+const SKIN_IDS = ['minimal-stack', 'classic', 'cyber-neon', 'porcelain-moon', 'pastel-toy', 'nature-zen'] as const;
 type SkinId = typeof SKIN_IDS[number];
-type SkinVisualStyle = 'breeze' | 'cyber' | 'porcelain' | 'pastel' | 'nature';
+const DEFAULT_SKIN_ID: SkinId = 'minimal-stack';
+const FREE_SKIN_IDS: readonly SkinId[] = [DEFAULT_SKIN_ID, 'classic'];
+type SkinVisualStyle = 'minimal' | 'breeze' | 'cyber' | 'porcelain' | 'pastel' | 'nature';
 type RGB = readonly [number, number, number];
 type HomeOverlay = 'none' | 'settings' | 'skins';
 type NatureMaterialId = 'light-wood' | 'green-stone' | 'walnut';
@@ -112,6 +123,9 @@ interface SkinDefinition {
   visualStyle: SkinVisualStyle;
   name: string;
   description: string;
+  blockAtlasResource: string;
+  backgroundResource?: string;
+  blockAtlasOrder: readonly number[];
   price: number;
   backgroundHue: number;
   backgroundSaturation: number;
@@ -145,11 +159,39 @@ interface SkinCardUI extends ButtonUI {
 }
 
 const SKINS: Record<SkinId, SkinDefinition> = {
+  'minimal-stack': {
+    id: 'minimal-stack',
+    visualStyle: 'minimal',
+    name: '极简叠境',
+    description: '初始免费 · 直边方块与连续渐变',
+    blockAtlasResource: 'minimal-neutral-v2',
+    backgroundResource: 'minimal-background-v2',
+    blockAtlasOrder: [0],
+    price: 0,
+    backgroundHue: 185,
+    backgroundSaturation: 28,
+    backgroundLightness: 40,
+    blockHue: 166,
+    blockHueStep: 5,
+    blockSaturation: 48,
+    blockLightness: 76,
+    blockPalette: [[188, 235, 217], [145, 220, 204], [128, 200, 207], [145, 220, 204]],
+    shadow: [21, 49, 55],
+    titleColor: [255, 255, 245],
+    textColor: [30, 76, 71],
+    mutedColor: [43, 77, 78],
+    accentColor: [174, 241, 217],
+    secondaryAccentColor: [151, 219, 232],
+    panelColor: [18, 43, 50],
+    buttonColor: [31, 72, 78],
+  },
   classic: {
     id: 'classic',
     visualStyle: 'breeze',
     name: '清风原野',
-    description: '清新明亮的经典配色',
+    description: '清透树脂与轻盈叶纹',
+    blockAtlasResource: 'breeze-blocks-v2',
+    blockAtlasOrder: [0, 1, 2, 0, 1],
     price: 0,
     backgroundHue: 187,
     backgroundSaturation: 56,
@@ -171,7 +213,9 @@ const SKINS: Record<SkinId, SkinDefinition> = {
     id: 'cyber-neon',
     visualStyle: 'cyber',
     name: '赛博霓虹',
-    description: '蓝紫霓虹与未来光栅',
+    description: '霓虹电路与金属光轨',
+    blockAtlasResource: 'cyber-blocks-v2',
+    blockAtlasOrder: [1, 0, 2, 1, 0],
     price: 12,
     backgroundHue: 235,
     backgroundSaturation: 78,
@@ -195,6 +239,8 @@ const SKINS: Record<SkinId, SkinDefinition> = {
     visualStyle: 'porcelain',
     name: '东方瓷韵',
     description: '青花白瓷与鎏金明月',
+    blockAtlasResource: 'porcelain-blocks-v2',
+    blockAtlasOrder: [2, 0, 1, 2, 0],
     price: 18,
     backgroundHue: 218,
     backgroundSaturation: 68,
@@ -217,7 +263,9 @@ const SKINS: Record<SkinId, SkinDefinition> = {
     id: 'pastel-toy',
     visualStyle: 'pastel',
     name: '奶油玩具',
-    description: '柔软糖果色与童趣积木',
+    description: '奶油糖果色与星星压纹',
+    blockAtlasResource: 'pastel-blocks-v2',
+    blockAtlasOrder: [2, 1, 0, 2, 1],
     price: 18,
     backgroundHue: 43,
     backgroundSaturation: 90,
@@ -241,6 +289,8 @@ const SKINS: Record<SkinId, SkinDefinition> = {
     visualStyle: 'nature',
     name: '自然禅意',
     description: '竹木山水与静谧涟漪',
+    blockAtlasResource: 'zen-blocks-v2',
+    blockAtlasOrder: [1, 0, 2, 1, 0],
     price: 24,
     backgroundHue: 48,
     backgroundSaturation: 27,
@@ -283,7 +333,9 @@ interface FallingPiece extends StackBlock {
 interface Spark {
   x: number;
   y: number;
-  cameraYAtSpawn: number;
+  worldX: number;
+  worldZ: number;
+  level: number;
   vx: number;
   vy: number;
   life: number;
@@ -313,6 +365,15 @@ interface PerfectFrame {
   alpha: number;
   fillAlpha: number;
   lineWidth: number;
+}
+
+interface CutSeam {
+  x1: number;
+  z1: number;
+  x2: number;
+  z2: number;
+  level: number;
+  life: number;
 }
 
 interface Point2 {
@@ -358,6 +419,7 @@ export class StackGame extends Component {
   private natureTextureRoot!: Node;
   private natureTextureBlocks: NatureTextureBlock[] = [];
   private natureMaterialFrames = new Map<NatureMaterialId, SpriteFrame>();
+  private blockAtlases = new Map<SkinId, SpriteFrame>();
   private homeTowerPreviewNode!: Node;
   private homeTowerPreviewSprite!: Sprite;
   private audioSource!: AudioSource;
@@ -377,6 +439,12 @@ export class StackGame extends Component {
   private testModeToggleLabel!: Label;
   private testModeStatusLabel!: Label;
   private resultGroup!: Node;
+  private resultRestartButton!: ButtonUI;
+  private resultHomeButton!: ButtonUI;
+  private resultSelection = 0;
+  private homeTransition: { elapsed: number; swapped: boolean } | null = null;
+  private transitionGraphics!: Graphics;
+  private transitionOpacity!: UIOpacity;
   private resultTitleLabel!: Label;
   private resultScoreLabel!: Label;
   private resultBestLabel!: Label;
@@ -421,6 +489,7 @@ export class StackGame extends Component {
   private sparks: Spark[] = [];
   private rings: ImpactRing[] = [];
   private perfectFrames: PerfectFrame[] = [];
+  private cutSeams: CutSeam[] = [];
 
   private score = 0;
   private bestScore = 0;
@@ -429,13 +498,13 @@ export class StackGame extends Component {
   private roundPerfectCount = 0;
   private lastEarnedCoins = 0;
   private coins = INITIAL_COINS;
-  private ownedSkins = new Set<SkinId>(['classic']);
-  private selectedSkinId: SkinId = 'classic';
+  private ownedSkins = new Set<SkinId>(FREE_SKIN_IDS);
+  private selectedSkinId: SkinId = DEFAULT_SKIN_ID;
   private soundEnabled = true;
   private testModeEnabled = false;
   private moveAxis: MoveAxis = 'x';
   private moveDirection = 1;
-  private moveSpeed = 6.4;
+  private moveSpeed = INITIAL_MOVE_SPEED;
   private spawnDelay = 0;
   private resultDelay = 0;
   private restartLock = 0;
@@ -488,6 +557,8 @@ export class StackGame extends Component {
     this.resumeButton.on(Button.EventType.CLICK, this.onResumeButton, this);
     this.restartButton.on(Button.EventType.CLICK, this.onRestartButton, this);
     this.homeButton.on(Button.EventType.CLICK, this.onHomeButton, this);
+    this.resultHomeButton.node.on(Button.EventType.CLICK, this.onHomeButton, this);
+    this.resultRestartButton.node.on(Button.EventType.CLICK, this.tryRestartAction, this);
     this.settingsButton.on(Button.EventType.CLICK, this.onSettingsButton, this);
     this.skinsButton.on(Button.EventType.CLICK, this.onSkinsButton, this);
     this.soundToggle.node.on(Button.EventType.CLICK, this.onSoundToggle, this);
@@ -516,6 +587,8 @@ export class StackGame extends Component {
     this.resumeButton.off(Button.EventType.CLICK, this.onResumeButton, this);
     this.restartButton.off(Button.EventType.CLICK, this.onRestartButton, this);
     this.homeButton.off(Button.EventType.CLICK, this.onHomeButton, this);
+    this.resultHomeButton.node.off(Button.EventType.CLICK, this.onHomeButton, this);
+    this.resultRestartButton.node.off(Button.EventType.CLICK, this.tryRestartAction, this);
     this.settingsButton.off(Button.EventType.CLICK, this.onSettingsButton, this);
     this.skinsButton.off(Button.EventType.CLICK, this.onSkinsButton, this);
     this.soundToggle.node.off(Button.EventType.CLICK, this.onSoundToggle, this);
@@ -542,6 +615,11 @@ export class StackGame extends Component {
     this.gamepadEastHeld = false;
     this.gamepadWestHeld = false;
     this.gamepadMenuAxisHeld = false;
+    if (this.homeTransition) {
+      this.homeTransition = null;
+      this.transitionGraphics.node.active = false;
+      this.showReadyScreen();
+    }
   }
 
   onDestroy(): void {
@@ -550,6 +628,10 @@ export class StackGame extends Component {
 
   update(dt: number): void {
     const elapsed = Number.isFinite(dt) ? Math.max(0, dt) : 0;
+    if (this.homeTransition) {
+      this.updateHomeTransition(elapsed);
+      return;
+    }
     if (this.phase === 'paused') {
       return;
     }
@@ -677,17 +759,20 @@ export class StackGame extends Component {
     this.precisionTipLabel = this.makeCenteredLabel('PrecisionTip', this.startGroup, COPY.precision, 22, -475, 660, 56, new Color(255, 255, 255, 155));
 
     this.resultGroup = this.makeFullNode('ResultScreen', this.hudSafeRoot);
+    this.resultGroup.addComponent(BlockInputEvents);
     this.resultTitleLabel = this.makeCenteredLabel('ResultTitle', this.resultGroup, COPY.gameOver, 54, 172, 560, 86, new Color(255, 255, 255, 255));
     this.resultScoreLabel = this.makeCenteredLabel('ResultScore', this.resultGroup, '0', 116, 50, 400, 140, new Color(255, 255, 255, 255));
     this.resultBestLabel = this.makeCenteredLabel('ResultBest', this.resultGroup, '', 28, -42, 560, 68, new Color(255, 255, 255, 220));
     this.resultCoinLabel = this.makeCenteredLabel('ResultCoins', this.resultGroup, '', 25, -108, 600, 60, new Color(255, 245, 190, 245));
-    this.makeCenteredLabel('Restart', this.resultGroup, COPY.restart, 30, -202, 620, 76, new Color(255, 255, 255, 235));
+    this.resultRestartButton = this.makeOverlayButton(this.resultGroup, 'ResultRestart', COPY.restartRound, 400, 88, 0, -208);
+    this.resultHomeButton = this.makeOverlayButton(this.resultGroup, 'ResultHome', COPY.home, 400, 88, 0, -314);
+    this.makeCenteredLabel('Restart', this.resultGroup, COPY.restart, 20, -399, 620, 52, new Color(255, 255, 255, 200));
     this.resultGroup.active = false;
 
     this.buildPauseUI();
     this.buildHomeOverlays();
     this.loadThemeBackgrounds();
-    this.loadNatureVisualAssets();
+    this.loadBlockVisualAssets();
   }
 
   private buildHomeButtons(): void {
@@ -728,7 +813,8 @@ export class StackGame extends Component {
       { x: 166, y: 300 },
       { x: -166, y: 65 },
       { x: 166, y: 65 },
-      { x: 0, y: -170 },
+      { x: -166, y: -170 },
+      { x: 166, y: -170 },
     ];
     SKIN_IDS.forEach((skinId, index) => {
       const skin = SKINS[skinId];
@@ -742,6 +828,12 @@ export class StackGame extends Component {
     this.skinsHintLabel = this.makeCenteredLabel('SkinsHint', this.skinsGroup, COPY.skinHint, 22, -338, 660, 54, new Color(255, 255, 255, 170));
     this.skinsCloseButton = this.makeOverlayButton(this.skinsGroup, 'SkinsClose', COPY.close, 400, 88, 0, -448);
     this.skinsGroup.active = false;
+
+    const transitionNode = this.makeFullNode('HomeTransition', this.node);
+    transitionNode.addComponent(BlockInputEvents);
+    this.transitionGraphics = transitionNode.addComponent(Graphics);
+    this.transitionOpacity = transitionNode.addComponent(UIOpacity);
+    transitionNode.active = false;
 
     this.updateSettingsUI();
     this.updateSkinShopUI();
@@ -1151,6 +1243,7 @@ export class StackGame extends Component {
     this.sparks = [];
     this.rings = [];
     this.perfectFrames = [];
+    this.cutSeams = [];
     this.stack = [];
 
     for (let level = 0; level < 5; level += 1) {
@@ -1181,7 +1274,7 @@ export class StackGame extends Component {
   }
 
   private startGame(): void {
-    if (!this.audioReady || this.homeOverlay !== 'none') {
+    if (this.homeTransition || !this.audioReady || this.homeOverlay !== 'none') {
       this.updateAudioPrompt();
       return;
     }
@@ -1198,7 +1291,7 @@ export class StackGame extends Component {
     this.roundPerfectCount = 0;
     this.lastEarnedCoins = 0;
     this.resetPerfectChain();
-    this.moveSpeed = 6.4;
+    this.moveSpeed = INITIAL_MOVE_SPEED;
     this.cameraY = 0;
     this.targetCameraY = 0;
     this.trauma = 0;
@@ -1213,6 +1306,7 @@ export class StackGame extends Component {
     this.sparks = [];
     this.rings = [];
     this.perfectFrames = [];
+    this.cutSeams = [];
     this.stack = [{ x: 0, z: 0, width: BASE_SIZE, depth: BASE_SIZE, level: 0, hue: this.hueForLevel(0) }];
     this.current = null;
 
@@ -1235,7 +1329,7 @@ export class StackGame extends Component {
     const level = previous.level + 1;
     this.moveAxis = level % 2 === 1 ? 'x' : 'z';
     this.moveDirection = level % 4 < 2 ? 1 : -1;
-    this.moveSpeed = Math.min(11.2, 6.4 + this.score * 0.18);
+    this.moveSpeed = Math.min(MAX_MOVE_SPEED, INITIAL_MOVE_SPEED + this.score * MOVE_SPEED_PER_SCORE);
 
     this.current = {
       x: previous.x,
@@ -1286,7 +1380,7 @@ export class StackGame extends Component {
     }
 
     this.phase = 'dropping';
-    this.world3D.beginDrop(this.current);
+    this.world3D.beginDrop(this.current, this.stack[this.stack.length - 1]);
   }
 
   private resolveCurrentBlockLanding(): void {
@@ -1309,6 +1403,7 @@ export class StackGame extends Component {
 
     const isPerfect = this.testModeEnabled
       || Math.abs(delta) <= Math.min(PERFECT_THRESHOLD, currentSize * 0.045);
+    let fragment: FallingPiece | null = null;
     if (isPerfect) {
       if (this.moveAxis === 'x') {
         placed.x = previous.x;
@@ -1316,26 +1411,43 @@ export class StackGame extends Component {
         placed.z = previous.z;
       }
       this.perfectStreak += 1;
-      this.handlePerfectPlacement(placed);
+      this.growPerfectBlock(placed);
     } else {
       this.resetPerfectChain();
-      this.trimBlockAndCreateFragment(placed, previous, delta);
+      fragment = this.trimBlockAndCreateFragment(placed, previous, delta);
       this.addTrauma(0.2);
-      this.spawnImpactFx(placed, false);
       this.playCutSound();
     }
 
     this.world3D.settle(placed);
+    if (isPerfect) {
+      this.handlePerfectPlacement(placed);
+    } else if (fragment) {
+      // Shrink the retained collider before enabling the detached rigid body.
+      this.world3D.spawnFragment(fragment, this.moveAxis, delta);
+      this.spawnCutFeedback(placed, delta);
+    }
 
     this.stack.push(placed);
     this.current = null;
     this.phase = 'playing';
     this.setScore(this.score + 1, true);
     this.targetCameraY = -Math.max(0, (this.stack.length - 5) * BLOCK_HEIGHT);
-    this.spawnDelay = isPerfect ? 0.095 : 0.055;
+    this.spawnDelay = isPerfect ? 0.095 : CUT_PREVIEW_SECONDS;
   }
 
-  private trimBlockAndCreateFragment(placed: StackBlock, previous: StackBlock, delta: number): void {
+  private growPerfectBlock(placed: StackBlock): boolean {
+    if (this.perfectStreak < PERFECT_GROWTH_START_STREAK) {
+      return false;
+    }
+    const previousWidth = placed.width;
+    const previousDepth = placed.depth;
+    placed.width = Math.min(PERFECT_GROWTH_MAX_SIZE, placed.width + PERFECT_GROWTH_STEP);
+    placed.depth = Math.min(PERFECT_GROWTH_MAX_SIZE, placed.depth + PERFECT_GROWTH_STEP);
+    return placed.width > previousWidth || placed.depth > previousDepth;
+  }
+
+  private trimBlockAndCreateFragment(placed: StackBlock, previous: StackBlock, delta: number): FallingPiece | null {
     const axisCenter = this.moveAxis === 'x' ? placed.x : placed.z;
     const axisSize = this.moveAxis === 'x' ? placed.width : placed.depth;
     const previousCenter = this.moveAxis === 'x' ? previous.x : previous.z;
@@ -1381,7 +1493,26 @@ export class StackGame extends Component {
 
     if (cutSize > 0.015) {
       this.fallingPieces.push(fragment);
-      this.world3D.spawnFragment(fragment, this.moveAxis, delta);
+      return fragment;
+    }
+    return null;
+  }
+
+  private spawnCutFeedback(block: StackBlock, delta: number): void {
+    const sign = Math.sign(delta || 1);
+    const x = block.x + (this.moveAxis === 'x' ? sign * block.width * 0.5 : 0);
+    const z = block.z + (this.moveAxis === 'z' ? sign * block.depth * 0.5 : 0);
+    // Show the actual cut edge even when a rear-facing offcut falls behind the tower.
+    this.cutSeams.push({
+      x1: x - (this.moveAxis === 'z' ? block.width * 0.5 : 0),
+      z1: z - (this.moveAxis === 'x' ? block.depth * 0.5 : 0),
+      x2: x + (this.moveAxis === 'z' ? block.width * 0.5 : 0),
+      z2: z + (this.moveAxis === 'x' ? block.depth * 0.5 : 0),
+      level: block.level + 1,
+      life: 0.36,
+    });
+    if (!this.reducedMotion) {
+      this.spawnImpactFx({ ...block, x, z }, false);
     }
   }
 
@@ -1397,6 +1528,7 @@ export class StackGame extends Component {
       ? 0
       : Math.min(0.11, 0.018 + (energy - 1) * 0.018);
     if (!this.reducedMotion) {
+      this.world3D.pulsePerfect(placed);
       this.spawnImpactFx(placed, true, this.perfectStreak);
     }
     this.spawnPerfectFrames(placed, this.perfectStreak);
@@ -1432,7 +1564,10 @@ export class StackGame extends Component {
   }
 
   private showResultScreen(): void {
+    if (this.phase === 'gameover') return;
     this.phase = 'gameover';
+    this.resultSelection = 0;
+    this.updateResultFocus();
     this.pauseButton.active = false;
     this.pauseGroup.active = false;
     let newBest = false;
@@ -1460,7 +1595,7 @@ export class StackGame extends Component {
       : `${COPY.perfectReward} ${this.roundPerfectCount} 次  ·  ${COPY.coins} +${this.lastEarnedCoins}`;
     this.resultBestLabel.lineHeight = this.testModeEnabled ? 32 : 34;
     this.resultGroup.active = true;
-    this.resultGroup.setScale(0.86, 0.86, 1);
+    this.resultGroup.setScale(this.reducedMotion ? 1 : 0.86, this.reducedMotion ? 1 : 0.86, 1);
     tween(this.resultGroup)
       .to(this.reducedMotion ? 0.01 : 0.24, { scale: new Vec3(1, 1, 1) }, { easing: 'backOut' })
       .start();
@@ -1514,11 +1649,11 @@ export class StackGame extends Component {
   }
 
   private spawnImpactFx(block: StackBlock, perfect: boolean, intensity = 1): void {
-    const center = this.projectWithoutShake(block.x, block.z, block.level + 1);
     const streak = Math.max(1, intensity);
     const energy = this.perfectFeedbackEnergy(streak);
     const amount = perfect ? Math.min(88, Math.round(17 + streak * 4 + energy * 4)) : 8;
     const accentColor = new Color(255, 238, 166, 255);
+    const contactCenter = perfect ? this.project(block.x, block.z, block.level) : null;
     for (let index = 0; index < amount; index += 1) {
       const angle = (Math.PI * 2 * index) / amount + Math.random() * 0.28;
       const isFastSpark = perfect && index % 5 === 0;
@@ -1529,12 +1664,23 @@ export class StackGame extends Component {
       const perfectLife = Math.min(0.72, 0.45 + (energy - 1) * 0.065);
       const sparkLife = perfectLife * (isFastSpark ? 0.72 : 1);
       const hasTrail = perfect && (isFastSpark || index % 3 === 0);
+      // The fixed camera faces +X/+Z. Rear seams are hidden by the upper block;
+      // UI particles have no depth test, so emit only along the two visible edges.
+      const edgePosition = -1 + 2 * (index + 0.5) / amount;
+      const worldX = block.x + (perfect ? (index % 2 === 0 ? 1 : edgePosition) * block.width * 0.5 : 0);
+      const worldZ = block.z + (perfect ? (index % 2 === 0 ? edgePosition : 1) * block.depth * 0.5 : 0);
+      const projectedEdge = perfect ? this.project(worldX, worldZ, block.level) : null;
+      const dx = projectedEdge && contactCenter ? projectedEdge.x - contactCenter.x : Math.cos(angle);
+      const dy = projectedEdge && contactCenter ? projectedEdge.y - contactCenter.y : Math.sin(angle);
+      const directionLength = perfect ? Math.max(1, Math.hypot(dx, dy)) : 1;
       this.sparks.push({
-        x: center.x,
-        y: center.y,
-        cameraYAtSpawn: this.cameraY,
-        vx: Math.cos(angle) * speed,
-        vy: Math.sin(angle) * speed + 30,
+        x: 0,
+        y: 0,
+        worldX,
+        worldZ,
+        level: perfect ? block.level : block.level + 1,
+        vx: dx / directionLength * speed,
+        vy: dy / directionLength * speed + 30,
         life: perfect ? sparkLife : 0.48,
         maxLife: perfect ? sparkLife : 0.48,
         size: perfect
@@ -1592,12 +1738,8 @@ export class StackGame extends Component {
         startExpansion: this.reducedMotion ? 10 : 5 + wave * 4,
         maxExpansion: this.reducedMotion ? 10 : 42 + (energy - 1) * 15 + wave * 11,
         alpha: Math.max(42, primaryAlpha * waveFade),
-        fillAlpha: wave === 0
-          ? Math.min(
-            this.reducedMotion ? 54 : 76,
-            (this.reducedMotion ? 14 : 18) + (energy - 1) * (this.reducedMotion ? 10 : 16),
-          )
-          : 0,
+        // UI effects have no depth test: a filled contact plane would paint over the block.
+        fillAlpha: 0,
         lineWidth: this.reducedMotion
           ? Math.min(5, 2.5 + (energy - 1) * 0.35)
           : Math.max(1.7, 2.8 + Math.min(2.2, (energy - 1) * 0.48) - wave * 0.16),
@@ -1633,6 +1775,10 @@ export class StackGame extends Component {
       frame.elapsed += dt;
     }
     this.perfectFrames = this.perfectFrames.filter((frame) => frame.elapsed < frame.delay + frame.duration);
+    for (const seam of this.cutSeams) {
+      seam.life -= dt;
+    }
+    this.cutSeams = this.cutSeams.filter(seam => seam.life > 0);
   }
 
   private updateFallingPieces(dt: number): void {
@@ -2025,6 +2171,16 @@ export class StackGame extends Component {
   }
 
   private drawEffects(g: Graphics): void {
+    for (const seam of this.cutSeams) {
+      const start = this.project(seam.x1, seam.z1, seam.level);
+      const end = this.project(seam.x2, seam.z2, seam.level);
+      const alpha = Math.round(230 * Math.min(1, seam.life / 0.18));
+      g.strokeColor = new Color(255, 255, 255, alpha);
+      g.lineWidth = this.reducedMotion ? 2 : 3.5;
+      g.moveTo(start.x, start.y);
+      g.lineTo(end.x, end.y);
+      g.stroke();
+    }
     for (const frame of this.perfectFrames) {
       if (frame.elapsed < frame.delay) {
         continue;
@@ -2033,20 +2189,21 @@ export class StackGame extends Component {
       const eased = 1 - Math.pow(1 - progress, 3);
       const fadeIn = Math.min(1, (frame.elapsed - frame.delay) / 0.035);
       const fade = fadeIn * Math.pow(1 - progress, 1.18);
-      const center = this.project(frame.block.x, frame.block.z, frame.block.level + 1);
-      const baseHalfWidth = (frame.block.width + frame.block.depth) * this.isoX * 0.5;
+      const center = this.project(frame.block.x, frame.block.z, frame.block.level);
+      const basePoints = this.blockPlanePoints(frame.block, frame.block.level);
+      const baseHalfWidth = Math.max(...basePoints.map(point => Math.abs(point.x - center.x)));
       const horizontalRoom = Math.max(0, this.visibleWidth * 0.5 - 32 - Math.abs(center.x) - baseHalfWidth);
       const maxExpansion = Math.min(frame.maxExpansion, horizontalRoom);
       const startExpansion = Math.min(frame.startExpansion, maxExpansion);
       const expansionPixels = startExpansion + (maxExpansion - startExpansion) * eased;
-      const expansion = expansionPixels / Math.max(1, this.isoX);
+      const projectedScale = Math.max(1, baseHalfWidth * 2 / (frame.block.width + frame.block.depth));
+      const expansion = expansionPixels / projectedScale;
       const outline: StackBlock = {
         ...frame.block,
         width: frame.block.width + expansion,
         depth: frame.block.depth + expansion,
-        level: frame.block.level + 0.035,
       };
-      const points = this.topPoints(outline);
+      const points = this.blockPlanePoints(outline, frame.block.level);
       if (frame.fillAlpha > 0) {
         const fillFade = fadeIn * Math.pow(1 - progress, 4);
         this.fillPolygon(
@@ -2057,11 +2214,11 @@ export class StackGame extends Component {
       }
       g.strokeColor = new Color(255, 255, 255, Math.round(frame.alpha * fade));
       g.lineWidth = frame.lineWidth;
-      g.moveTo(points[0].x, points[0].y);
-      for (let index = 1; index < points.length; index += 1) {
-        g.lineTo(points[index].x, points[index].y);
-      }
-      g.close();
+      // Only the front contact edges are visible; don't draw rear edges through
+      // the upper block's top face (these effects live on a depthless UI layer).
+      g.moveTo(points[1].x, points[1].y);
+      g.lineTo(points[2].x, points[2].y);
+      g.lineTo(points[3].x, points[3].y);
       g.stroke();
     }
 
@@ -2080,9 +2237,9 @@ export class StackGame extends Component {
       const alpha = Math.round(255 * visibility);
       g.fillColor = new Color(spark.color.r, spark.color.g, spark.color.b, alpha);
       const size = Math.max(0.9, spark.size * (0.42 + ratio * 0.58));
-      const cameraOffset = this.cameraY - spark.cameraYAtSpawn;
-      const x = spark.x + this.shakeX;
-      const y = spark.y + cameraOffset + this.shakeY;
+      const anchor = this.project(spark.worldX, spark.worldZ, spark.level);
+      const x = anchor.x + spark.x;
+      const y = anchor.y + spark.y;
       if (spark.trailLength > 0) {
         const speed = Math.max(1, Math.hypot(spark.vx, spark.vy));
         const trail = spark.trailLength * visibility;
@@ -2133,39 +2290,32 @@ export class StackGame extends Component {
       g.rect(-this.visibleWidth * 0.5, -this.visibleHeight * 0.5, this.visibleWidth, this.visibleHeight);
       g.fill();
       g.fillColor = this.rgb(skin.panelColor, 224);
-      g.roundRect(-245, -285, 490, 520, 34);
+      g.roundRect(-290, -440, 580, 675, 34);
       g.fill();
       g.strokeColor = this.rgb(skin.accentColor, 108);
       g.lineWidth = 1.5;
-      g.roundRect(-245, -285, 490, 520, 34);
+      g.roundRect(-290, -440, 580, 675, 34);
       g.stroke();
     }
   }
 
   private topPoints(block: StackBlock): Point2[] {
+    return this.blockPlanePoints(block, block.level + 1);
+  }
+
+  private blockPlanePoints(block: StackBlock, level: number): Point2[] {
     const halfW = block.width * 0.5;
     const halfD = block.depth * 0.5;
     return [
-      this.project(block.x - halfW, block.z - halfD, block.level + 1),
-      this.project(block.x + halfW, block.z - halfD, block.level + 1),
-      this.project(block.x + halfW, block.z + halfD, block.level + 1),
-      this.project(block.x - halfW, block.z + halfD, block.level + 1),
+      this.project(block.x - halfW, block.z - halfD, level),
+      this.project(block.x + halfW, block.z - halfD, level),
+      this.project(block.x + halfW, block.z + halfD, level),
+      this.project(block.x - halfW, block.z + halfD, level),
     ];
   }
 
-  private projectWithoutShake(x: number, z: number, level: number): Point2 {
-    return {
-      x: (x - z) * this.isoX,
-      y: this.worldOriginY + (x + z) * this.isoY + level * BLOCK_HEIGHT + this.cameraY,
-    };
-  }
-
   private project(x: number, z: number, level: number): Point2 {
-    const point = this.projectWithoutShake(x, z, level);
-    return {
-      x: point.x + this.shakeX,
-      y: point.y + this.shakeY,
-    };
+    return this.world3D.projectToUI(x, z, level, this.effectsGraphics.node);
   }
 
   private fillPolygon(g: Graphics, points: Point2[], color: Color): void {
@@ -2483,10 +2633,57 @@ export class StackGame extends Component {
   }
 
   private returnToHome(): void {
-    if (this.phase !== 'paused') {
+    if (this.homeTransition || (this.phase !== 'paused' && this.phase !== 'gameover')) {
       return;
     }
-    this.showReadyScreen();
+    if (this.phase === 'gameover' && this.restartLock > 0) return;
+    if (this.reducedMotion) {
+      this.showReadyScreen();
+      return;
+    }
+    this.world3D.setPaused(true);
+    this.homeTransition = { elapsed: 0, swapped: false };
+    this.transitionGraphics.node.active = true;
+    this.transitionOpacity.opacity = 0;
+    this.drawHomeTransition();
+  }
+
+  private drawHomeTransition(): void {
+    const g = this.transitionGraphics;
+    g.clear();
+    g.fillColor = this.rgb(this.currentSkin().panelColor);
+    g.rect(-this.visibleWidth / 2, -this.visibleHeight / 2, this.visibleWidth, this.visibleHeight);
+    g.fill();
+  }
+
+  private updateHomeTransition(dt: number): void {
+    const transition = this.homeTransition;
+    if (!transition) return;
+    transition.elapsed += dt;
+    if (!transition.swapped && transition.elapsed >= HOME_FADE_OUT_SECONDS) {
+      transition.swapped = true;
+      this.showReadyScreen();
+    }
+    const progress = transition.swapped
+      ? 1 - Math.min(1, (transition.elapsed - HOME_FADE_OUT_SECONDS) / HOME_FADE_IN_SECONDS)
+      : Math.min(1, transition.elapsed / HOME_FADE_OUT_SECONDS);
+    this.transitionOpacity.opacity = Math.round(255 * progress * progress * (3 - 2 * progress));
+    this.drawHomeTransition();
+    if (transition.elapsed >= HOME_FADE_OUT_SECONDS + HOME_FADE_IN_SECONDS) {
+      this.homeTransition = null;
+      this.transitionGraphics.node.active = false;
+      this.lastActionAt = Date.now();
+    }
+  }
+
+  private updateResultFocus(): void {
+    this.drawOverlayButton(this.resultRestartButton, 400, 88, this.resultSelection === 0);
+    this.drawOverlayButton(this.resultHomeButton, 400, 88, this.resultSelection === 1);
+  }
+
+  private activateResultSelection(): void {
+    if (this.resultSelection === 1) this.returnToHome();
+    else this.tryRestartAction();
   }
 
   private restartPausedGame(): void {
@@ -2530,6 +2727,7 @@ export class StackGame extends Component {
   }
 
   private onKeyDown(event: EventKeyboard): void {
+    if (this.homeTransition) return;
     const isPauseToggle = event.keyCode === KeyCode.ESCAPE
       || event.keyCode === KeyCode.KEY_P;
     const isMenuNavigation = event.keyCode === KeyCode.ARROW_UP
@@ -2551,6 +2749,16 @@ export class StackGame extends Component {
       return;
     }
     this.heldKeys.add(event.keyCode);
+
+    if (this.phase === 'gameover') {
+      if (event.keyCode === KeyCode.ESCAPE) this.returnToHome();
+      else if (isMenuNavigation) {
+        this.resultSelection = 1 - this.resultSelection;
+        this.updateResultFocus();
+      } else if (event.keyCode === KeyCode.ENTER || event.keyCode === KeyCode.SPACE) this.activateResultSelection();
+      else if (event.keyCode === KeyCode.KEY_R) this.tryRestartAction();
+      return;
+    }
 
     if (this.homeOverlay !== 'none') {
       if (event.keyCode === KeyCode.ESCAPE) {
@@ -2655,6 +2863,16 @@ export class StackGame extends Component {
     this.gamepadWestHeld = westPressed;
     this.gamepadMenuAxisHeld = menuAxisPressed;
 
+    if (this.homeTransition) return;
+    if (this.phase === 'gameover') {
+      if (eastJustPressed) this.returnToHome();
+      else if (menuAxisJustPressed) {
+        this.resultSelection = 1 - this.resultSelection;
+        this.updateResultFocus();
+      } else if (southJustPressed) this.activateResultSelection();
+      return;
+    }
+
     if (this.homeOverlay !== 'none') {
       if (eastJustPressed || optionsJustPressed) {
         this.closeHomeOverlay();
@@ -2730,6 +2948,7 @@ export class StackGame extends Component {
   }
 
   private consumeActionDebounce(): boolean {
+    if (this.homeTransition) return false;
     const now = Date.now();
     if (now - this.lastActionAt < 90) {
       return false;
@@ -2838,7 +3057,7 @@ export class StackGame extends Component {
         sys.localStorage.setItem(INITIAL_COIN_GRANT_STORAGE_KEY, '1');
       }
 
-      this.ownedSkins = new Set<SkinId>(['classic']);
+      this.ownedSkins = new Set<SkinId>(FREE_SKIN_IDS);
       const ownedRaw = sys.localStorage.getItem(OWNED_SKINS_STORAGE_KEY);
       if (ownedRaw) {
         const owned = JSON.parse(ownedRaw) as unknown;
@@ -2846,7 +3065,7 @@ export class StackGame extends Component {
           for (const skinId of owned) {
             if (skinId === 'sunset') {
               this.ownedSkins.add('cyber-neon');
-            } else if (typeof skinId === 'string' && (SKIN_IDS as readonly string[]).includes(skinId)) {
+            } else if (typeof skinId === 'string' && (SKIN_IDS as readonly string[]).indexOf(skinId) >= 0) {
               this.ownedSkins.add(skinId as SkinId);
             }
           }
@@ -2855,10 +3074,10 @@ export class StackGame extends Component {
       const selected = sys.localStorage.getItem(SELECTED_SKIN_STORAGE_KEY);
       const migratedSelected = selected === 'sunset' ? 'cyber-neon' : selected;
       this.selectedSkinId = typeof migratedSelected === 'string'
-        && (SKIN_IDS as readonly string[]).includes(migratedSelected)
+        && (SKIN_IDS as readonly string[]).indexOf(migratedSelected) >= 0
         && this.ownedSkins.has(migratedSelected as SkinId)
         ? migratedSelected as SkinId
-        : 'classic';
+        : DEFAULT_SKIN_ID;
       this.soundEnabled = sys.localStorage.getItem(SOUND_STORAGE_KEY) !== '0';
 
       const prefersReducedMotion = sys.isBrowser
@@ -2870,8 +3089,8 @@ export class StackGame extends Component {
     } catch {
       this.bestScore = 0;
       this.coins = INITIAL_COINS;
-      this.ownedSkins = new Set<SkinId>(['classic']);
-      this.selectedSkinId = 'classic';
+      this.ownedSkins = new Set<SkinId>(FREE_SKIN_IDS);
+      this.selectedSkinId = DEFAULT_SKIN_ID;
       this.soundEnabled = true;
       this.reducedMotion = false;
     }
@@ -2923,7 +3142,7 @@ export class StackGame extends Component {
 
   private loadThemeBackgrounds(): void {
     for (const skinId of SKIN_IDS) {
-      resources.load(`skins/${skinId}/spriteFrame`, SpriteFrame, (error, frame) => {
+      resources.load(`skins/${SKINS[skinId].backgroundResource ?? skinId}/spriteFrame`, SpriteFrame, (error, frame) => {
         if (error || !frame) {
           return;
         }
@@ -2940,7 +3159,18 @@ export class StackGame extends Component {
     }
   }
 
-  private loadNatureVisualAssets(): void {
+  private loadBlockVisualAssets(): void {
+    for (const skinId of SKIN_IDS) {
+      const name = SKINS[skinId].blockAtlasResource;
+      resources.load(`skins/${name}/spriteFrame`, SpriteFrame, (error, frame) => {
+        if (error || !frame || !this.isValid) return;
+        this.blockAtlases.set(skinId, frame);
+        if (this.selectedSkinId === skinId) {
+          this.applyWorld3DTheme();
+          this.drawFrame();
+        }
+      });
+    }
     resources.load('skins/nature-zen-tower/spriteFrame', SpriteFrame, (error, frame) => {
       if (error || !frame) {
         return;
@@ -2981,7 +3211,7 @@ export class StackGame extends Component {
       return;
     }
     const skin = this.currentSkin();
-    const blockColors = Array.from({ length: 12 }, (_, level) => (
+    const blockColors = Array.from({ length: skin.visualStyle === 'minimal' ? 64 : 12 }, (_, level) => (
       this.blockColorsForSkin(skin, level, 255, this.hueForLevel(level)).top
     ));
     const materialTextures = skin.visualStyle === 'nature'
@@ -2997,6 +3227,10 @@ export class StackGame extends Component {
       background: this.skinBackgrounds.get(this.selectedSkinId) ?? null,
       blockColors,
       materialTextures,
+      blockAtlas: this.blockAtlases.get(this.selectedSkinId) ?? null,
+      blockAtlasOrder: skin.blockAtlasOrder,
+      tintAtlas: skin.visualStyle === 'minimal',
+      sharpEdges: skin.visualStyle === 'minimal',
       accentColor: this.rgb(skin.accentColor),
       roughness: skin.visualStyle === 'cyber' ? 0.3 : skin.visualStyle === 'porcelain' ? 0.4 : 0.68,
       metallic: skin.visualStyle === 'cyber' ? 0.34 : skin.visualStyle === 'porcelain' ? 0.12 : 0.03,
@@ -3024,13 +3258,33 @@ export class StackGame extends Component {
     return (skin.blockHue + level * skin.blockHueStep) % 360;
   }
 
+  private minimalLayerColor(level: number): RGB {
+    // Eight layers per stop, including a smooth wrap back to the first color.
+    const stops: readonly RGB[] = [
+      [59, 80, 109], [51, 179, 185], [174, 248, 124], [229, 168, 65],
+      [231, 119, 43], [255, 234, 201], [168, 166, 223], [73, 138, 175],
+    ];
+    const position = (Math.abs(level) % 64) / 8;
+    const index = Math.floor(position);
+    const t = position - index;
+    const from = stops[index];
+    const to = stops[(index + 1) % stops.length];
+    return [
+      Math.round(from[0] + (to[0] - from[0]) * t),
+      Math.round(from[1] + (to[1] - from[1]) * t),
+      Math.round(from[2] + (to[2] - from[2]) * t),
+    ];
+  }
+
   private blockColorsForSkin(
     skin: SkinDefinition,
     level: number,
     opacity: number,
     hueOverride?: number,
   ): { top: Color; left: Color; right: Color; outline: Color } {
-    const paletteColor = skin.blockPalette?.[Math.abs(level) % skin.blockPalette.length];
+    const paletteColor = skin.visualStyle === 'minimal'
+      ? this.minimalLayerColor(level)
+      : skin.blockPalette?.[Math.abs(level) % skin.blockPalette.length];
     const top = paletteColor
       ? this.rgb(paletteColor, opacity)
       : this.hslToColor(
@@ -3107,7 +3361,7 @@ export class StackGame extends Component {
     this.resultCoinLabel.color = this.rgb(skin.accentColor, 245);
     this.setNamedLabelColor(this.resultGroup, 'Restart', new Color(panelText.r, panelText.g, panelText.b, 235));
 
-    this.pauseButtonLabel.color = text;
+    this.pauseButtonLabel.color = this.textOnButton(skin.buttonColor);
     this.setNamedLabelColor(this.pauseGroup, 'PauseTitle', panelText);
     this.setNamedLabelColor(this.pauseGroup, 'PauseHint', new Color(panelText.r, panelText.g, panelText.b, 178));
     this.setNamedLabelColor(this.pauseGroup, 'PauseControls', new Color(panelText.r, panelText.g, panelText.b, 158));
@@ -3124,6 +3378,7 @@ export class StackGame extends Component {
     this.updatePauseMenuFocus();
     this.updateSettingsUI();
     this.updateSkinShopUI();
+    this.updateResultFocus();
   }
 
   private setNamedLabelColor(parent: Node, childName: string, color: Color): void {

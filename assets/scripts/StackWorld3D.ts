@@ -6,14 +6,17 @@ import {
   ERigidBodyType,
   Layers,
   Material,
+  Mesh,
   MeshRenderer,
   Node,
   PhysicsSystem,
   RigidBody,
   SpriteFrame,
+  UITransform,
   Vec3,
   primitives,
   utils,
+  view,
 } from 'cc';
 
 export interface WorldBlockState {
@@ -28,6 +31,11 @@ export interface StackWorldTheme {
   background: SpriteFrame | null;
   blockColors: readonly Color[];
   materialTextures: readonly SpriteFrame[];
+  /** Three columns of materials; top faces in row 0, side faces in row 1. */
+  blockAtlas?: SpriteFrame | null;
+  blockAtlasOrder?: readonly number[];
+  tintAtlas?: boolean;
+  sharpEdges?: boolean;
   accentColor: Color;
   roughness: number;
   metallic: number;
@@ -42,6 +50,10 @@ const PROFILER_LAYER = Layers.BitMask.PROFILER;
 // compared directly with the block below, while retaining a short physical drop.
 const DROP_HEIGHT = 0.05;
 const DROP_MISS_DISTANCE = 2.2;
+const MAX_DROP_SECONDS = 2;
+const FRAGMENT_LIFETIME = 5;
+const BLOCK_VISUAL_NAME = 'BlockVisual';
+const PERFECT_PULSE_DURATION = 0.24;
 
 /**
  * Owns the perspective camera, real meshes and Ammo rigid bodies used by the
@@ -52,10 +64,15 @@ export class StackWorld3D {
   private readonly blockRoot: Node;
   private readonly cameraNode: Node;
   private readonly camera: Camera;
+  private readonly uiCamera: Camera | null;
   private readonly backgroundNode: Node;
   private readonly backgroundRenderer: MeshRenderer;
   private readonly blockNodes = new Map<WorldBlockState, Node>();
-  private readonly looseNodes = new Set<Node>();
+  private readonly looseNodes = new Map<Node, number>();
+  private readonly perfectPulses = new Map<Node, number>();
+  private readonly blockMesh: Mesh;
+  private readonly decoratedMeshes: Mesh[] = [];
+  private readonly sharpMesh: Mesh;
   private readonly blockMaterials = new Map<string, Material>();
   private readonly ownedMaterials = new Set<Material>();
   private backgroundMaterial: Material | null = null;
@@ -63,15 +80,29 @@ export class StackWorld3D {
   private droppingBlock: WorldBlockState | null = null;
   private droppingNode: Node | null = null;
   private dropCollider: BoxCollider | null = null;
+  private landingNode: Node | null = null;
   private dropCollided = false;
   private dropElapsed = 0;
   private cameraTargetY = 1.35;
   private cameraCurrentY = 1.35;
+  private paused = false;
 
   constructor(canvasNode: Node, private readonly blockHeight: number) {
     const scene = canvasNode.scene;
     this.worldRoot = new Node('StackWorld3D');
     this.worldRoot.layer = DEFAULT_LAYER;
+    const box = primitives.box();
+    box.colors = [];
+    for (let i = 0; i < box.normals!.length; i += 3) {
+      const [nx, ny, nz] = box.normals!.slice(i, i + 3);
+      const shade = ny > 0.5 ? 1 : nz > 0.5 ? 0.86 : nx > 0.5 ? 0.74 : ny < -0.5 ? 0.5 : 0.66;
+      box.colors.push(shade, shade, shade, 1);
+    }
+    this.blockMesh = utils.createMesh(box);
+    this.sharpMesh = utils.createMesh(this.decoratedBlockGeometry(0, true));
+    for (let variant = 0; variant < 3; variant += 1) {
+      this.decoratedMeshes.push(utils.createMesh(this.decoratedBlockGeometry(variant)));
+    }
     if (scene) {
       scene.addChild(this.worldRoot);
     }
@@ -118,6 +149,7 @@ export class StackWorld3D {
     rim.illuminance = 18000;
 
     const uiCamera = canvasNode.getChildByName('Camera')?.getComponent(Camera);
+    this.uiCamera = uiCamera ?? null;
     if (uiCamera) {
       uiCamera.priority = 10;
       uiCamera.visibility = UI_LAYER | PROFILER_LAYER;
@@ -131,6 +163,8 @@ export class StackWorld3D {
   }
 
   setTheme(theme: StackWorldTheme): void {
+    const retiredMaterials = Array.from(this.ownedMaterials);
+    this.ownedMaterials.clear();
     this.theme = theme;
     this.blockMaterials.clear();
 
@@ -151,9 +185,13 @@ export class StackWorld3D {
     for (const [block, node] of this.blockNodes) {
       this.applyBlockMaterial(node, block.level);
     }
-    for (const node of this.looseNodes) {
+    for (const node of this.looseNodes.keys()) {
       const level = Number(node.name.split('-').pop()) || 0;
       this.applyBlockMaterial(node, level);
+    }
+    // Release only after all renderers have switched to the replacement assets.
+    for (const material of retiredMaterials) {
+      material.destroy();
     }
   }
 
@@ -165,6 +203,8 @@ export class StackWorld3D {
 
     for (const [block, node] of this.blockNodes) {
       if (!visible.has(block) && block !== this.droppingBlock) {
+        this.perfectPulses.delete(node);
+        node.active = false;
         node.destroy();
         this.blockNodes.delete(block);
       }
@@ -187,17 +227,23 @@ export class StackWorld3D {
     }
   }
 
-  beginDrop(block: WorldBlockState): void {
+  beginDrop(block: WorldBlockState, support: WorldBlockState): void {
+    this.clearDropListener();
     const node = this.ensureBlockNode(block);
+    // Input may arrive before the next render sync; release at the visible footprint.
+    node.setScale(block.width, this.blockHeight, block.depth);
+    node.setPosition(block.x, this.movingBlockY(block), block.z);
     const body = node.getComponent(RigidBody)!;
     const collider = node.getComponent(BoxCollider)!;
     this.droppingBlock = block;
     this.droppingNode = node;
     this.dropCollider = collider;
+    this.landingNode = this.ensureBlockNode(support);
     this.dropCollided = false;
     this.dropElapsed = 0;
 
     collider.on('onCollisionEnter', this.onDropCollision, this);
+    collider.on('onCollisionStay', this.onDropCollision, this);
     body.type = ERigidBodyType.DYNAMIC;
     body.mass = Math.max(0.45, block.width * block.depth * 0.07);
     body.useGravity = true;
@@ -220,7 +266,8 @@ export class StackWorld3D {
     }
 
     const targetY = this.stableBlockY(this.droppingBlock);
-    if (this.droppingNode.position.y < targetY - DROP_MISS_DISTANCE) {
+    if (this.droppingNode.position.y < targetY - DROP_MISS_DISTANCE
+      || this.dropElapsed >= MAX_DROP_SECONDS) {
       return 'missed';
     }
     return null;
@@ -239,6 +286,15 @@ export class StackWorld3D {
     this.positionStableBlock(node, block);
   }
 
+  pulsePerfect(block: WorldBlockState): void {
+    const node = this.blockNodes.get(block);
+    if (!node?.isValid) {
+      return;
+    }
+    this.perfectPulses.set(node, 0);
+    this.blockVisual(node).setScale(1.015, 1.008, 1.015);
+  }
+
   releaseMiss(block: WorldBlockState, axis: 'x' | 'z', direction: number): void {
     const node = this.blockNodes.get(block);
     if (!node) {
@@ -248,7 +304,7 @@ export class StackWorld3D {
     this.droppingBlock = null;
     this.droppingNode = null;
     this.blockNodes.delete(block);
-    this.looseNodes.add(node);
+    this.looseNodes.set(node, 0);
     const body = node.getComponent(RigidBody)!;
     body.type = ERigidBodyType.DYNAMIC;
     body.useGravity = true;
@@ -266,9 +322,15 @@ export class StackWorld3D {
       return;
     }
     const node = this.createBlockNode(`CutFragment-${fragment.level}`, fragment.level);
-    this.looseNodes.add(node);
+    this.looseNodes.set(node, 0);
     node.setScale(fragment.width, this.blockHeight, fragment.depth);
-    node.setPosition(fragment.x, this.stableBlockY(fragment) + 0.03, fragment.z);
+    const sign = Math.sign(direction || 1);
+    // A small clearance prevents the cut faces from immediately re-contacting.
+    node.setPosition(
+      fragment.x + (axis === 'x' ? sign * 0.045 : 0),
+      this.stableBlockY(fragment) + 0.03,
+      fragment.z + (axis === 'z' ? sign * 0.045 : 0),
+    );
     const body = node.getComponent(RigidBody)!;
     body.type = ERigidBodyType.DYNAMIC;
     body.mass = Math.max(0.18, fragment.width * fragment.depth * 0.06);
@@ -277,8 +339,8 @@ export class StackWorld3D {
     body.angularDamping = 0.08;
     body.linearFactor = Vec3.ONE;
     body.angularFactor = Vec3.ONE;
-    const impulse = Math.sign(direction || 1) * 2.1;
-    body.setLinearVelocity(new Vec3(axis === 'x' ? impulse : 0, 0.55, axis === 'z' ? impulse : 0));
+    const impulse = sign * 3.2;
+    body.setLinearVelocity(new Vec3(axis === 'x' ? impulse : 0, 1.4, axis === 'z' ? impulse : 0));
     body.setAngularVelocity(new Vec3(axis === 'z' ? 1.7 : 0.4, 0.75, axis === 'x' ? -1.7 : -0.4));
     body.wakeUp();
   }
@@ -288,11 +350,26 @@ export class StackWorld3D {
     const follow = 1 - Math.exp(-4.8 * Math.max(0, dt));
     this.cameraCurrentY += (this.cameraTargetY - this.cameraCurrentY) * follow;
     this.updateCameraTransform(shakeX, shakeY);
+    // Fill every aspect ratio without stretching the background image.
+    const visible = view.getVisibleSize();
+    const viewportAspect = visible.width / Math.max(1, visible.height);
+    const imageAspect = this.theme?.background?.rect
+      ? this.theme.background.rect.width / this.theme.background.rect.height
+      : viewportAspect;
+    const height = 2 * 38 * Math.tan(this.camera.fov * Math.PI / 360);
+    const coverHeight = Math.max(height, height * viewportAspect / imageAspect);
+    this.backgroundNode.setScale(coverHeight * imageAspect, coverHeight, 0.04);
 
-    for (const node of Array.from(this.looseNodes)) {
-      if (!node.isValid || node.position.y < -18) {
+    if (!this.paused) {
+      this.updatePerfectPulses(dt);
+    }
+
+    for (const [node, age] of this.looseNodes) {
+      this.looseNodes.set(node, age + dt);
+      if (!node.isValid || node.position.y < -18 || age + dt >= FRAGMENT_LIFETIME) {
         this.looseNodes.delete(node);
         if (node.isValid) {
+          node.active = false;
           node.destroy();
         }
       }
@@ -300,6 +377,7 @@ export class StackWorld3D {
   }
 
   setPaused(paused: boolean): void {
+    this.paused = paused;
     PhysicsSystem.instance.enable = !paused;
   }
 
@@ -310,23 +388,34 @@ export class StackWorld3D {
     this.dropCollided = false;
     this.dropElapsed = 0;
     for (const node of this.blockNodes.values()) {
+      node.active = false;
       node.destroy();
     }
-    for (const node of this.looseNodes) {
+    for (const node of this.looseNodes.keys()) {
       if (node.isValid) {
+        node.active = false;
         node.destroy();
       }
     }
     this.blockNodes.clear();
     this.looseNodes.clear();
+    this.perfectPulses.clear();
     this.cameraTargetY = 1.35;
     this.cameraCurrentY = 1.35;
+    this.paused = false;
     PhysicsSystem.instance.enable = true;
     this.updateCameraTransform(0, 0);
   }
 
   destroy(): void {
     this.reset();
+    this.worldRoot.active = false;
+    this.backgroundRenderer.mesh?.destroy();
+    this.blockMesh.destroy();
+    for (const mesh of this.decoratedMeshes) {
+      mesh.destroy();
+    }
+    this.sharpMesh.destroy();
     for (const material of this.ownedMaterials) {
       material.destroy();
     }
@@ -337,15 +426,18 @@ export class StackWorld3D {
   }
 
   private onDropCollision(event: { otherCollider?: BoxCollider }): void {
-    const otherName = event.otherCollider?.node?.name ?? '';
-    if (otherName.startsWith('StackBlock-')) {
+    // A falling fragment or a lower tier must never count as the target landing.
+    if (event.otherCollider?.node === this.landingNode && this.droppingBlock
+      && this.droppingNode!.position.y >= this.stableBlockY(this.droppingBlock) - 0.1) {
       this.dropCollided = true;
     }
   }
 
   private clearDropListener(): void {
     this.dropCollider?.off('onCollisionEnter', this.onDropCollision, this);
+    this.dropCollider?.off('onCollisionStay', this.onDropCollision, this);
     this.dropCollider = null;
+    this.landingNode = null;
   }
 
   private ensureBlockNode(block: WorldBlockState): Node {
@@ -361,19 +453,12 @@ export class StackWorld3D {
     const node = new Node(name);
     node.layer = DEFAULT_LAYER;
     this.blockRoot.addChild(node);
-    const renderer = node.addComponent(MeshRenderer);
-    const box = primitives.box();
-    box.colors = [];
-    for (let i = 0; i < (box.normals?.length ?? 0); i += 3) {
-      const nx = box.normals![i];
-      const ny = box.normals![i + 1];
-      const nz = box.normals![i + 2];
-      const shade = ny > 0.5 ? 1 : nz > 0.5 ? 0.86 : nx > 0.5 ? 0.74 : ny < -0.5 ? 0.5 : 0.66;
-      box.colors.push(shade, shade, shade, 1);
-    }
-    renderer.mesh = utils.createMesh(box);
-    renderer.castShadow = true;
-    renderer.receiveShadow = true;
+    const visual = new Node(BLOCK_VISUAL_NAME);
+    visual.layer = DEFAULT_LAYER;
+    visual.setScale(1, 1, 1);
+    node.addChild(visual);
+    const renderer = visual.addComponent(MeshRenderer);
+    renderer.mesh = this.blockMesh;
     const collider = node.addComponent(BoxCollider);
     collider.size = Vec3.ONE;
     const body = node.addComponent(RigidBody);
@@ -384,27 +469,33 @@ export class StackWorld3D {
   }
 
   private applyBlockMaterial(node: Node, level: number): void {
-    const renderer = node.getComponent(MeshRenderer);
+    const renderer = this.blockVisual(node).getComponent(MeshRenderer);
     if (renderer) {
+      const order = this.theme?.blockAtlasOrder;
+      const variant = order?.length ? order[Math.abs(level) % order.length] : Math.abs(level) % 3;
+      renderer.mesh = this.theme?.blockAtlas?.texture
+        ? (this.theme.sharpEdges ? this.sharpMesh : this.decoratedMeshes[variant])
+        : this.blockMesh;
       renderer.setMaterial(this.materialForLevel(level), 0);
     }
   }
 
   private materialForLevel(level: number): Material {
     const theme = this.theme;
+    const atlas = theme?.blockAtlas;
     const colorCount = Math.max(1, theme?.blockColors.length ?? 1);
     const textureCount = Math.max(1, theme?.materialTextures.length ?? 1);
     const colorIndex = Math.abs(level) % colorCount;
     const textureIndex = Math.abs(level) % textureCount;
-    const materialKey = `${colorIndex}:${textureIndex}`;
+    const materialKey = atlas?.texture ? (theme?.tintAtlas ? `tinted-atlas:${colorIndex}` : 'decorated-atlas') : `${colorIndex}:${textureIndex}`;
     const cached = this.blockMaterials.get(materialKey);
     if (cached) {
       return cached;
     }
 
-    const textureFrame = theme?.materialTextures.length
+    const textureFrame = atlas?.texture ? atlas : (theme?.materialTextures.length
       ? theme.materialTextures[textureIndex]
-      : null;
+      : null);
     const material = new Material(`StackBlockMaterial-${level}`);
     material.initialize({
       effectName: 'builtin-unlit',
@@ -415,13 +506,112 @@ export class StackWorld3D {
     });
     const colors = theme?.blockColors ?? [Color.WHITE];
     const color = colors[colorIndex] ?? Color.WHITE;
-    material.setProperty('mainColor', color);
+    // Authored glaze/wood colors are already baked into the atlas.
+    material.setProperty('mainColor', atlas?.texture && !theme?.tintAtlas ? Color.WHITE : color);
     if (textureFrame?.texture) {
       material.setProperty('mainTexture', textureFrame.texture);
     }
     this.blockMaterials.set(materialKey, material);
     this.ownedMaterials.add(material);
     return material;
+  }
+
+  private decoratedBlockGeometry(variant: number, sharp = false) {
+    const positions: number[] = [];
+    const normals: number[] = [];
+    const uvs: number[] = [];
+    const colors: number[] = [];
+    const indices: number[] = [];
+    // A 0.06-world-unit bevel at the initial 5 x 0.62 x 5 block size.
+    const inner = sharp ? [0.5, 0.5, 0.5] : [0.488, 0.41, 0.488];
+    const addFace = (points: number[][], normal: number[]) => {
+      const a = points[1].map((value, i) => value - points[0][i]);
+      const b = points[2].map((value, i) => value - points[0][i]);
+      const cross = [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+      if (cross.reduce((sum, value, i) => sum + value * normal[i], 0) < 0) points.reverse();
+      const length = Math.hypot(...normal);
+      const n = normal.map(value => value / length);
+      const top = n[1] > 0.5;
+      const shade = Math.min(1, 0.66 + Math.max(0, n[1]) * 0.34
+        + Math.max(0, n[0]) * 0.08 + Math.max(0, n[2]) * 0.17);
+      const start = positions.length / 3;
+      for (const point of points) {
+        positions.push(...point);
+        normals.push(...n);
+        colors.push(shade, shade, shade, 1);
+        const u = top ? point[0] + 0.5
+          : (Math.abs(n[0]) > Math.abs(n[2]) ? point[2] : point[0]) + 0.5;
+        const v = top ? 0.5 - point[2] : 0.5 - point[1];
+        // Inset each tile by two pixels to prevent neighboring colors bleeding.
+        uvs.push((variant + (2 + u * 508) / 512) / 3, ((top ? 0 : 1) + (2 + v * 508) / 512) / 2);
+      }
+      for (let i = 1; i < points.length - 1; i += 1) indices.push(start, start + i, start + i + 1);
+    };
+    // Six broad faces, twelve bevel strips, and eight closed corner triangles.
+    for (let axis = 0; axis < 3; axis += 1) {
+      const a = (axis + 1) % 3;
+      const b = (axis + 2) % 3;
+      for (const sign of [-1, 1]) {
+        const normal = [0, 0, 0]; normal[axis] = sign;
+        addFace([[-1, -1], [1, -1], [1, 1], [-1, 1]].map(([sa, sb]) => {
+          const point = [0, 0, 0]; point[axis] = sign * 0.5;
+          point[a] = sa * inner[a]; point[b] = sb * inner[b]; return point;
+        }), normal);
+      }
+    }
+    if (sharp) {
+      return { positions, normals, uvs, colors, indices, minPos: new Vec3(-0.5, -0.5, -0.5), maxPos: new Vec3(0.5, 0.5, 0.5) };
+    }
+    for (let a = 0; a < 3; a += 1) {
+      for (let b = a + 1; b < 3; b += 1) {
+        const c = 3 - a - b;
+        for (const sa of [-1, 1]) for (const sb of [-1, 1]) {
+          const normal = [0, 0, 0]; normal[a] = sa; normal[b] = sb;
+          const point = (face: number, sc: number) => {
+            const p = [0, 0, 0]; p[a] = sa * (face === a ? 0.5 : inner[a]);
+            p[b] = sb * (face === b ? 0.5 : inner[b]); p[c] = sc * inner[c]; return p;
+          };
+          addFace([point(a, -1), point(a, 1), point(b, 1), point(b, -1)], normal);
+        }
+      }
+    }
+    for (const sx of [-1, 1]) for (const sy of [-1, 1]) for (const sz of [-1, 1]) {
+      const signs = [sx, sy, sz];
+      addFace([0, 1, 2].map(axis => signs.map((sign, i) => sign * (i === axis ? 0.5 : inner[i]))), signs);
+    }
+    return { positions, normals, uvs, colors, indices, minPos: new Vec3(-0.5, -0.5, -0.5), maxPos: new Vec3(0.5, 0.5, 0.5) };
+  }
+
+  private blockVisual(node: Node): Node {
+    return node.getChildByName(BLOCK_VISUAL_NAME) ?? node;
+  }
+
+  private updatePerfectPulses(dt: number): void {
+    for (const [node, elapsed] of this.perfectPulses) {
+      if (!node.isValid) {
+        this.perfectPulses.delete(node);
+        continue;
+      }
+      const nextElapsed = elapsed + Math.max(0, dt);
+      const visual = this.blockVisual(node);
+      if (nextElapsed >= PERFECT_PULSE_DURATION) {
+        visual.setScale(1, 1, 1);
+        this.perfectPulses.delete(node);
+        continue;
+      }
+
+      const progress = nextElapsed / PERFECT_PULSE_DURATION;
+      let pulse: number;
+      if (progress < 0.3) {
+        const rise = progress / 0.3;
+        pulse = 1 - Math.pow(1 - rise, 3);
+      } else {
+        const settle = (progress - 0.3) / 0.7;
+        pulse = Math.pow(1 - settle, 2) * Math.cos(settle * Math.PI * 1.2);
+      }
+      visual.setScale(1 + pulse * 0.08, 1 + pulse * 0.045, 1 + pulse * 0.08);
+      this.perfectPulses.set(node, nextElapsed);
+    }
   }
 
   private makeStatic(node: Node): void {
@@ -460,6 +650,23 @@ export class StackWorld3D {
 
   private movingBlockY(block: WorldBlockState): number {
     return this.stableBlockY(block) + DROP_HEIGHT;
+  }
+
+  projectToUI(x: number, z: number, level: number, uiNode: Node): Vec3 {
+    // Refresh matrices before projecting: effects render in the same frame as follow/shake.
+    this.camera.camera?.update();
+    const screenPoint = this.camera.worldToScreen(new Vec3(x, level * this.blockHeight, z));
+    if (this.uiCamera) {
+      this.uiCamera.camera?.update();
+      const worldPoint = this.uiCamera.screenToWorld(screenPoint);
+      return uiNode.getComponent(UITransform)!.convertToNodeSpaceAR(worldPoint);
+    }
+    const visible = view.getVisibleSize();
+    return new Vec3(
+      (screenPoint.x / this.camera.camera.width - 0.5) * visible.width,
+      (screenPoint.y / this.camera.camera.height - 0.5) * visible.height,
+      0,
+    );
   }
 
   private updateCameraTransform(shakeX: number, shakeY: number): void {
