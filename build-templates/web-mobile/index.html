@@ -24,6 +24,130 @@
   <meta name="x5-page-mode" content="app">
 
   <link rel="stylesheet" type="text/css" href="style.css">
+  <style>
+    html,
+    body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+    }
+
+    html,
+    body,
+    #GameDiv,
+    #Cocos3dGameContainer {
+      background: #63d7c1;
+    }
+
+    #GameCanvas {
+      opacity: 0;
+      transition: opacity 180ms ease-out;
+    }
+
+    body.game-ready #GameCanvas {
+      opacity: 1;
+    }
+
+    #game-boot-cover {
+      position: fixed;
+      top: 0;
+      right: 0;
+      bottom: 0;
+      left: 0;
+      z-index: 9999;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-sizing: border-box;
+      overflow: hidden;
+      background:
+        radial-gradient(circle at 50% 18%, rgba(255, 255, 255, 0.22), transparent 42%),
+        linear-gradient(180deg, #55d2c3 0%, #7fe3af 54%, #b7fb69 100%);
+      opacity: 1;
+      visibility: visible;
+      transition: opacity 180ms ease-out, visibility 0s linear 180ms;
+    }
+
+    body.game-ready #game-boot-cover {
+      opacity: 0;
+      visibility: hidden;
+    }
+
+    .game-boot-content {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      max-width: 100%;
+      color: #173f3c;
+      font-family: Helvetica, Verdana, Arial, sans-serif;
+    }
+
+    .game-boot-mark {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      margin-bottom: 18px;
+    }
+
+    .game-boot-block + .game-boot-block {
+      margin-top: 6px;
+    }
+
+    .game-boot-block {
+      width: 72px;
+      width: clamp(58px, 7vw, 92px);
+      height: 18px;
+      height: clamp(15px, 1.8vw, 24px);
+      border: 1px solid rgba(255, 255, 255, 0.72);
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.48);
+      box-shadow: 0 8px 22px rgba(22, 80, 72, 0.12);
+      animation: boot-block-breathe 1.2s ease-in-out infinite alternate;
+    }
+
+    .game-boot-block:nth-child(1) { transform: translateX(10%); }
+    .game-boot-block:nth-child(2) { transform: translateX(-8%); animation-delay: 120ms; }
+    .game-boot-block:nth-child(3) { transform: translateX(3%); animation-delay: 240ms; }
+
+    .game-boot-title {
+      margin: 0;
+      color: rgba(255, 255, 245, 0.96);
+      font-size: 40px;
+      font-size: clamp(30px, 4vw, 58px);
+      font-weight: 700;
+      letter-spacing: 0.12em;
+      text-indent: 0.12em;
+      text-shadow: 0 4px 18px rgba(18, 67, 62, 0.18);
+    }
+
+    .game-boot-status {
+      display: block;
+      margin-top: 18px;
+      font-size: 16px;
+      font-size: clamp(14px, 1.4vw, 20px);
+      letter-spacing: 0.08em;
+      opacity: 0.7;
+    }
+
+    @keyframes boot-block-breathe {
+      from { opacity: 0.58; }
+      to { opacity: 1; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      #GameCanvas,
+      #game-boot-cover {
+        transition: none;
+      }
+
+      .game-boot-block {
+        animation: none;
+      }
+    }
+  </style>
 </head>
 <body>
   <div id="GameDiv" cc_exact_fit_screen="true">
@@ -32,10 +156,50 @@
     </div>
   </div>
 
+  <div id="game-boot-cover" role="status" aria-label="游戏加载中">
+    <div class="game-boot-content">
+      <div class="game-boot-mark" aria-hidden="true">
+        <span class="game-boot-block"></span>
+        <span class="game-boot-block"></span>
+        <span class="game-boot-block"></span>
+      </div>
+      <h1 class="game-boot-title">叠个正着</h1>
+      <span class="game-boot-status">正在搭建舞台…</span>
+    </div>
+  </div>
+
   <script src="src/polyfills.bundle.js" charset="utf-8"></script>
   <script src="src/system.bundle.js" charset="utf-8"></script>
   <script src="src/import-map.json" type="systemjs-importmap" charset="utf-8"></script>
   <script>
+    (function () {
+      var revealed = false;
+      var fallbackTimer;
+
+      function revealGame() {
+        if (revealed) return;
+        revealed = true;
+        window.clearTimeout(fallbackTimer);
+        window.requestAnimationFrame(function () {
+          window.requestAnimationFrame(function () {
+            document.body.classList.add('game-ready');
+            var cover = document.getElementById('game-boot-cover');
+            if (cover) {
+              window.setTimeout(function () {
+                if (cover.parentNode) cover.parentNode.removeChild(cover);
+              }, 260);
+            }
+          });
+        });
+      }
+
+      window.addEventListener('stack-game-ready', revealGame, { once: true });
+      fallbackTimer = window.setTimeout(function () {
+        var status = document.querySelector('.game-boot-status');
+        if (status && !revealed) status.textContent = '资源加载中，请稍候…';
+      }, 7000);
+    }());
+
     System.import('./index.js').catch(function (error) {
       console.error(error);
     });

@@ -12,6 +12,7 @@ import {
   PhysicsSystem,
   RigidBody,
   SpriteFrame,
+  Texture2D,
   UITransform,
   Vec3,
   primitives,
@@ -36,6 +37,7 @@ export interface StackWorldTheme {
   blockAtlasOrder?: readonly number[];
   tintAtlas?: boolean;
   sharpEdges?: boolean;
+  outlineColor?: Color;
   accentColor: Color;
   roughness: number;
   metallic: number;
@@ -54,6 +56,8 @@ const MAX_DROP_SECONDS = 2;
 const FRAGMENT_LIFETIME = 5;
 const BLOCK_VISUAL_NAME = 'BlockVisual';
 const PERFECT_PULSE_DURATION = 0.24;
+const BACKGROUND_BASE_DISTANCE = 38;
+const HOME_PRESENTATION_DISTANCE_SCALE = 1.18;
 
 /**
  * Owns the perspective camera, real meshes and Ammo rigid bodies used by the
@@ -73,7 +77,10 @@ export class StackWorld3D {
   private readonly blockMesh: Mesh;
   private readonly decoratedMeshes: Mesh[] = [];
   private readonly sharpMesh: Mesh;
+  private outlineMesh: Mesh | null = null;
   private readonly blockMaterials = new Map<string, Material>();
+  private readonly presentationMaterials = new Map<Material, { material: Material; color: Color }>();
+  private presentationOpacity = 1;
   private readonly ownedMaterials = new Set<Material>();
   private backgroundMaterial: Material | null = null;
   private theme: StackWorldTheme | null = null;
@@ -85,6 +92,9 @@ export class StackWorld3D {
   private dropElapsed = 0;
   private cameraTargetY = 1.35;
   private cameraCurrentY = 1.35;
+  private compositionOffsetX = 0;
+  private homePresentation = false;
+  private overviewTopLevel: number | null = null;
   private paused = false;
 
   constructor(canvasNode: Node, private readonly blockHeight: number) {
@@ -118,7 +128,7 @@ export class StackWorld3D {
     this.camera.projection = Camera.ProjectionType.PERSPECTIVE;
     this.camera.fov = 34;
     this.camera.near = 0.1;
-    this.camera.far = 120;
+    this.camera.far = 600;
     this.camera.priority = -10;
     this.camera.visibility = DEFAULT_LAYER;
     this.camera.clearFlags = Camera.ClearFlag.SOLID_COLOR;
@@ -127,7 +137,7 @@ export class StackWorld3D {
     this.backgroundNode = new Node('ThemeBackground3D');
     this.backgroundNode.layer = DEFAULT_LAYER;
     this.cameraNode.addChild(this.backgroundNode);
-    this.backgroundNode.setPosition(0, 0, -38);
+    this.backgroundNode.setPosition(0, 0, -BACKGROUND_BASE_DISTANCE);
     this.backgroundNode.setScale(23, 39, 0.04);
     this.backgroundRenderer = this.backgroundNode.addComponent(MeshRenderer);
     this.backgroundRenderer.mesh = utils.createMesh(primitives.box());
@@ -167,6 +177,7 @@ export class StackWorld3D {
     this.ownedMaterials.clear();
     this.theme = theme;
     this.blockMaterials.clear();
+    this.presentationMaterials.clear();
 
     const background = new Material('StackBackground3D');
     const hasBackground = !!theme.background?.texture;
@@ -181,6 +192,7 @@ export class StackWorld3D {
     this.backgroundRenderer.setMaterial(background, 0);
     this.backgroundMaterial = background;
     this.ownedMaterials.add(background);
+    this.updateBackdropTransform();
 
     for (const [block, node] of this.blockNodes) {
       this.applyBlockMaterial(node, block.level);
@@ -346,19 +358,13 @@ export class StackWorld3D {
   }
 
   tick(dt: number, topLevel: number, shakeX: number, shakeY: number): void {
-    this.cameraTargetY = Math.max(1.35, topLevel * this.blockHeight - 1.15);
-    const follow = 1 - Math.exp(-4.8 * Math.max(0, dt));
+    this.cameraTargetY = this.overviewTopLevel === null
+      ? Math.max(1.35, topLevel * this.blockHeight - 1.15)
+      : Math.max(0.9, (this.overviewTopLevel + 1) * this.blockHeight * 0.5);
+    const followSpeed = this.overviewTopLevel === null ? 4.8 : 6.4;
+    const follow = 1 - Math.exp(-followSpeed * Math.max(0, dt));
     this.cameraCurrentY += (this.cameraTargetY - this.cameraCurrentY) * follow;
     this.updateCameraTransform(shakeX, shakeY);
-    // Fill every aspect ratio without stretching the background image.
-    const visible = view.getVisibleSize();
-    const viewportAspect = visible.width / Math.max(1, visible.height);
-    const imageAspect = this.theme?.background?.rect
-      ? this.theme.background.rect.width / this.theme.background.rect.height
-      : viewportAspect;
-    const height = 2 * 38 * Math.tan(this.camera.fov * Math.PI / 360);
-    const coverHeight = Math.max(height, height * viewportAspect / imageAspect);
-    this.backgroundNode.setScale(coverHeight * imageAspect, coverHeight, 0.04);
 
     if (!this.paused) {
       this.updatePerfectPulses(dt);
@@ -376,12 +382,76 @@ export class StackWorld3D {
     }
   }
 
+  setCompositionOffset(offsetX: number): void {
+    this.compositionOffsetX = Number.isFinite(offsetX) ? offsetX : 0;
+    this.updateCameraTransform(0, 0);
+  }
+
+  /** Leave breathing room around the home tower without altering gameplay framing. */
+  setHomePresentation(enabled: boolean): void {
+    if (this.homePresentation === enabled) return;
+    this.homePresentation = enabled;
+    this.updateCameraTransform(0, 0);
+  }
+
+  setOverview(topLevel: number | null): void {
+    this.overviewTopLevel = topLevel === null || !Number.isFinite(topLevel)
+      ? null
+      : Math.max(0, topLevel);
+    if (this.overviewTopLevel !== null) {
+      this.cameraTargetY = Math.max(0.9, (this.overviewTopLevel + 1) * this.blockHeight * 0.5);
+    }
+    this.updateCameraTransform(0, 0);
+  }
+
   setPaused(paused: boolean): void {
     this.paused = paused;
     PhysicsSystem.instance.enable = !paused;
   }
 
+  /** Render-only fade: the theme background, rigid bodies and camera stay intact. */
+  setPresentationOpacity(opacity: number): void {
+    const next = Number.isFinite(opacity) ? Math.max(0, Math.min(1, opacity)) : 1;
+    if (next === this.presentationOpacity) return;
+    const rebind = (next < 1) !== (this.presentationOpacity < 1)
+      || (next > 0) !== (this.presentationOpacity > 0);
+    this.presentationOpacity = next;
+    for (const { material, color } of this.presentationMaterials.values()) {
+      material.setProperty('mainColor', new Color(color.r, color.g, color.b, Math.round(color.a * next)));
+    }
+    if (rebind) {
+      for (const [block, node] of this.blockNodes) this.applyBlockMaterial(node, block.level);
+      for (const node of this.looseNodes.keys()) {
+        if (node.isValid) this.applyBlockMaterial(node, Number(node.name.split('-').pop()) || 0);
+      }
+    }
+  }
+
+  private presentationMaterial(opaque: Material): Material {
+    if (this.presentationOpacity === 1) return opaque;
+    let entry = this.presentationMaterials.get(opaque);
+    if (!entry) {
+      const texture = opaque.getProperty('mainTexture') as Texture2D | null;
+      const color = opaque.getProperty('mainColor') as Color;
+      const material = new Material('StackPresentationFade');
+      // Built-in transparent technique; shared/cached per original material,
+      // never a full-screen pass and never a material allocation per frame.
+      material.initialize({
+        effectName: 'builtin-unlit', technique: 1,
+        defines: { USE_VERTEX_COLOR: opaque !== this.blockMaterials.get('outline'), USE_TEXTURE: !!texture },
+      });
+      if (texture) material.setProperty('mainTexture', texture);
+      material.setProperty('mainColor', new Color(color.r, color.g, color.b, Math.round(color.a * this.presentationOpacity)));
+      entry = { material, color };
+      this.presentationMaterials.set(opaque, entry);
+      this.ownedMaterials.add(material);
+    }
+    return entry.material;
+  }
+
   reset(): void {
+    // Keep presentationOpacity and homePresentation across resets: the caller
+    // controls the destination framing while incoming meshes remain invisible.
     this.clearDropListener();
     this.droppingBlock = null;
     this.droppingNode = null;
@@ -402,6 +472,7 @@ export class StackWorld3D {
     this.perfectPulses.clear();
     this.cameraTargetY = 1.35;
     this.cameraCurrentY = 1.35;
+    this.overviewTopLevel = null;
     this.paused = false;
     PhysicsSystem.instance.enable = true;
     this.updateCameraTransform(0, 0);
@@ -416,11 +487,13 @@ export class StackWorld3D {
       mesh.destroy();
     }
     this.sharpMesh.destroy();
+    this.outlineMesh?.destroy();
     for (const material of this.ownedMaterials) {
       material.destroy();
     }
     this.blockMaterials.clear();
     this.ownedMaterials.clear();
+    this.presentationMaterials.clear();
     this.backgroundMaterial = null;
     this.worldRoot.destroy();
   }
@@ -476,8 +549,57 @@ export class StackWorld3D {
       renderer.mesh = this.theme?.blockAtlas?.texture
         ? (this.theme.sharpEdges ? this.sharpMesh : this.decoratedMeshes[variant])
         : this.blockMesh;
-      renderer.setMaterial(this.materialForLevel(level), 0);
+      renderer.setMaterial(this.presentationMaterial(this.materialForLevel(level)), 0);
     }
+    const visual = this.blockVisual(node);
+    visual.active = this.presentationOpacity > 0;
+    let outline = visual.getChildByName('ThemeOutline');
+    if (!this.theme?.outlineColor) {
+      if (outline) outline.active = false;
+      return;
+    }
+    if (!outline) {
+      outline = new Node('ThemeOutline');
+      outline.layer = DEFAULT_LAYER;
+      visual.addChild(outline);
+      outline.addComponent(MeshRenderer);
+    }
+    outline.active = true;
+    if (!this.outlineMesh) this.outlineMesh = utils.createMesh(this.blockOutlineGeometry());
+    let material = this.blockMaterials.get('outline');
+    if (!material) {
+      material = new Material('BlockOutline');
+      material.initialize({ effectName: 'builtin-unlit' });
+      material.setProperty('mainColor', this.theme.outlineColor);
+      this.blockMaterials.set('outline', material);
+      this.ownedMaterials.add(material);
+    }
+    const edges = outline.getComponent(MeshRenderer);
+    edges.mesh = this.outlineMesh;
+    edges.setMaterial(this.presentationMaterial(material), 0);
+  }
+
+  private blockOutlineGeometry() {
+    // Twelve narrow solid edge strips, combined into one shared mesh. They sit
+    // over the bevel, so no coplanar white seam or transparent sorting is needed.
+    const cube = this.decoratedBlockGeometry(0, true);
+    const positions: number[] = [];
+    const normals: number[] = [];
+    const indices: number[] = [];
+    const add = (center: number[], size: number[]) => {
+      const offset = positions.length / 3;
+      cube.positions.forEach((value, i) => positions.push(value * size[i % 3] + center[i % 3]));
+      normals.push(...cube.normals);
+      indices.push(...cube.indices.map(index => index + offset));
+    };
+    for (const a of [-1, 1]) {
+      for (const b of [-1, 1]) {
+        add([0, a * 0.49, b * 0.492], [0.992, 0.026, 0.014]);
+        add([a * 0.492, b * 0.49, 0], [0.014, 0.026, 0.992]);
+        add([a * 0.492, 0, b * 0.492], [0.014, 0.992, 0.014]);
+      }
+    }
+    return { positions, normals, indices };
   }
 
   private materialForLevel(level: number): Material {
@@ -672,8 +794,42 @@ export class StackWorld3D {
   private updateCameraTransform(shakeX: number, shakeY: number): void {
     const sx = shakeX * 0.012;
     const sy = shakeY * 0.012;
-    const target = new Vec3(0, this.cameraCurrentY, 0);
-    this.cameraNode.setPosition(10.8 + sx, this.cameraCurrentY + 9.2 + sy, 13.6);
+    const overviewScale = this.cameraOverviewScale()
+      * (this.homePresentation ? HOME_PRESENTATION_DISTANCE_SCALE : 1);
+    const target = new Vec3(this.compositionOffsetX, this.cameraCurrentY, 0);
+    this.cameraNode.setPosition(
+      10.8 * overviewScale + this.compositionOffsetX + sx,
+      this.cameraCurrentY + 9.2 * overviewScale + sy,
+      13.6 * overviewScale,
+    );
     this.cameraNode.lookAt(target, Vec3.UP);
+    this.updateBackdropTransform();
+  }
+
+  private updateBackdropTransform(): void {
+    // Refresh presentation independently of tick: paused viewport changes must
+    // still cover the camera without advancing physics, pulses or debris.
+    const visible = view.getVisibleSize();
+    const viewportAspect = visible.width / Math.max(1, visible.height);
+    const imageAspect = this.theme?.background?.rect
+      ? this.theme.background.rect.width / this.theme.background.rect.height
+      : viewportAspect;
+    // The backdrop is camera-local. Move it with the overview camera so tall
+    // towers never pass behind it when the camera pulls back.
+    const backgroundDistance = BACKGROUND_BASE_DISTANCE * this.cameraOverviewScale();
+    this.backgroundNode.setPosition(0, 0, -backgroundDistance);
+    const height = 2 * backgroundDistance * Math.tan(this.camera.fov * Math.PI / 360);
+    const coverHeight = Math.max(height, height * viewportAspect / imageAspect);
+    this.backgroundNode.setScale(coverHeight * imageAspect, coverHeight, 0.04);
+  }
+
+  private cameraOverviewScale(): number {
+    if (this.overviewTopLevel === null) {
+      return 1;
+    }
+    const overviewHeight = (this.overviewTopLevel + 1) * this.blockHeight;
+    // Pull back enough to keep the base and the highest settled block inside the
+    // vertical field of view. Short towers still get a small establishing shot.
+    return Math.max(1.1, (overviewHeight + 2.8) / 9.2);
   }
 }

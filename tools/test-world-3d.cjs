@@ -20,9 +20,16 @@ class Asset {
 }
 class Material extends Asset {
   properties = {};
-  initialize() {}
+  initialize(info) { this.info = info; }
   setProperty(name, value) { this.properties[name] = value; }
+  getProperty(name) { return this.properties[name]; }
 }
+class Color {
+  constructor(r = 255, g = 255, b = 255, a = 255) { Object.assign(this, { r, g, b, a }); }
+  static WHITE = new Color();
+}
+class UIOpacity { opacity = 255; }
+class Widget { enabled = true; isValid = true; updateAlignment() {} }
 class MeshRenderer {
   setMaterial(material) { assert.equal(material.destroyed, false); this.material = material; }
 }
@@ -60,7 +67,7 @@ class Node {
   addComponent(Type) { const c = new Type(); c.node = this; this.components.set(Type, c); return c; }
   getComponent(Type) { return this.components.get(Type); }
   getChildByName(name) { return this.children.find(c => c.name === name); }
-  setPosition(x, y, z) { this.position = new Vec3(x, y, z); }
+  setPosition(x, y, z) { this.position = typeof x === 'object' ? new Vec3(x.x, x.y, x.z) : new Vec3(x, y, z); }
   setScale(x, y, z) { this.scale = new Vec3(x, y, z); }
   setRotationFromEuler() {}
   lookAt() {}
@@ -69,10 +76,17 @@ class Node {
 const cc = {
   sys: { isBrowser: false, localStorage: null },
   _decorator: { ccclass: () => Type => Type }, Component: class {},
-  BoxCollider, Camera, Color: class { static WHITE = {}; }, DirectionalLight: class {},
+  BoxCollider, Camera, Color, DirectionalLight: class {}, UIOpacity, Widget,
+  Tween: { stopAllByTarget() {} },
   ERigidBodyType: { STATIC: 0, KINEMATIC: 1, DYNAMIC: 2 },
   Layers: { BitMask: { DEFAULT: 1, UI_2D: 2, PROFILER: 4 } },
   Material, Mesh: Asset, MeshRenderer, Node, RigidBody, UITransform, Vec3,
+  KeyCode: {
+    ENTER: 13, SPACE: 32, ESCAPE: 27,
+    ARROW_LEFT: 37, ARROW_UP: 38, ARROW_RIGHT: 39, ARROW_DOWN: 40,
+    KEY_A: 65, KEY_D: 68, KEY_K: 75, KEY_P: 80, KEY_R: 82,
+    KEY_S: 83, KEY_T: 84, KEY_W: 87,
+  },
   PhysicsSystem: { instance: { enable: true } },
   view: { getVisibleSize: () => ({ width: 750, height: 1334 }) },
   primitives: { box: () => ({ normals: [0, 1, 0, 1, 0, 0, 0, 0, 1] }) },
@@ -85,7 +99,7 @@ const compiled = ts.transpileModule(source, { compilerOptions: {
 const sandbox = { exports: {}, require: id => { assert.equal(id, 'cc'); return cc; } };
 vm.runInNewContext(compiled, sandbox);
 const { StackWorld3D } = sandbox.exports;
-const theme = { background: null, blockColors: [{}], materialTextures: [] };
+const theme = { background: null, blockColors: [new Color(180, 220, 200)], materialTextures: [] };
 function setup() {
   const canvas = new Node('Canvas'); canvas.scene = new Node('Scene');
   const world = new StackWorld3D(canvas, 0.62);
@@ -94,6 +108,73 @@ function setup() {
   world.setTheme(theme); world.sync([base], moving);
   return { world, base, moving };
 }
+
+test('cyber edges share assets, preserve colliders and hide when switching themes', () => {
+  const { world, base, moving } = setup();
+  const baseNode = world.blockNodes.get(base);
+  const collider = baseNode.getComponent(BoxCollider);
+  world.setTheme({ ...theme, outlineColor: {} });
+  const edge = node => node.getChildByName('BlockVisual').getChildByName('ThemeOutline');
+  const baseEdge = edge(baseNode);
+  const movingEdge = edge(world.blockNodes.get(moving));
+  assert.equal(baseEdge.active, true);
+  assert.equal(baseEdge.getComponent(MeshRenderer).mesh, movingEdge.getComponent(MeshRenderer).mesh);
+  assert.equal(baseNode.getComponent(BoxCollider), collider);
+  const mesh = baseEdge.getComponent(MeshRenderer).mesh;
+  assert.equal(mesh.geometry.indices.length, 12 * 36);
+  assert.ok(mesh.geometry.positions.every(Number.isFinite));
+  world.setTheme(theme);
+  assert.equal(baseEdge.active, false);
+  world.destroy();
+  assert.equal(mesh.destroyed, true);
+});
+
+test('tower fades use shared transparent materials, include debris/edges and leave background and bodies intact', () => {
+  const { world, base } = setup();
+  world.setTheme({ ...theme, outlineColor: new Color(90, 245, 255) });
+  world.spawnFragment({ ...base, x: 3, width: 1 }, 'x', 1);
+  const baseNode = world.blockNodes.get(base);
+  const collider = baseNode.getComponent(BoxCollider);
+  const body = baseNode.getComponent(RigidBody);
+  const visual = baseNode.getChildByName('BlockVisual');
+  const renderer = visual.getComponent(MeshRenderer);
+  const opaque = renderer.material;
+  const background = world.backgroundRenderer.material;
+  const originalPosition = baseNode.position;
+  world.setPresentationOpacity(0.5);
+  const fade = renderer.material;
+  assert.equal(fade.info.technique, 1);
+  assert.equal(fade.getProperty('mainColor').a, 128);
+  assert.equal(visual.getChildByName('ThemeOutline').getComponent(MeshRenderer).material.getProperty('mainColor').a, 128);
+  const fragment = [...world.looseNodes.keys()][0];
+  assert.equal(fragment.getChildByName('BlockVisual').getComponent(MeshRenderer).material.info.technique, 1);
+  const count = world.ownedMaterials.size;
+  world.setPresentationOpacity(0.2);
+  assert.equal(renderer.material, fade);
+  assert.equal(world.ownedMaterials.size, count);
+  assert.equal(world.backgroundRenderer.material, background);
+  assert.equal(baseNode.getComponent(BoxCollider), collider);
+  assert.equal(baseNode.getComponent(RigidBody), body);
+  assert.equal(baseNode.position, originalPosition);
+  world.setPresentationOpacity(0);
+  assert.equal(visual.active, false);
+  assert.equal(baseNode.active, true);
+  assert.equal(fragment.getChildByName('BlockVisual').active, false);
+  world.reset(); world.sync([base], null);
+  assert.equal(world.blockNodes.get(base).getChildByName('BlockVisual').active, false);
+  world.setPresentationOpacity(1);
+  const incoming = world.blockNodes.get(base).getChildByName('BlockVisual');
+  assert.equal(incoming.active, true);
+  assert.equal(incoming.getComponent(MeshRenderer).material, opaque);
+  assert.equal(opaque.getProperty('mainColor').a, 255);
+  world.setPresentationOpacity(0.5);
+  const retired = [...world.ownedMaterials];
+  world.setTheme(theme);
+  assert.ok(retired.every(m => m.destroyed));
+  assert.equal(incoming.getComponent(MeshRenderer).material.getProperty('mainColor').a, 128);
+  world.destroy();
+  assert.equal(fade.destroyed, true);
+});
 
 test('only the intended support can resolve a drop, including a persistent contact', () => {
   const { world, base, moving } = setup();
@@ -243,6 +324,106 @@ test('effects use both cameras for a centered Canvas rather than adding half a v
   world.destroy();
 });
 
+test('composition offset reframes menus without moving physical blocks', () => {
+  const { world, base } = setup();
+  const block = world.blockNodes.get(base);
+  const originalBlockPosition = { ...block.position };
+  world.setCompositionOffset(-3.2);
+  assert.ok(Math.abs(world.cameraNode.position.x - 7.6) < 1e-9);
+  assert.deepEqual({ ...block.position }, originalBlockPosition);
+  world.setCompositionOffset(Number.NaN);
+  assert.ok(Math.abs(world.cameraNode.position.x - 10.8) < 1e-9);
+  world.destroy();
+});
+
+test('overview camera pulls back and targets the middle of the complete tower', () => {
+  const { world, base } = setup();
+  const blockPosition = { ...world.blockNodes.get(base).position };
+  world.setOverview(19);
+  world.tick(1, 19, 0, 0);
+  assert.ok(Math.abs(world.cameraTargetY - 6.2) < 1e-9);
+  assert.ok(world.cameraNode.position.x > 10.8);
+  assert.ok(world.cameraNode.position.z > 13.6);
+  assert.deepEqual({ ...world.blockNodes.get(base).position }, blockPosition);
+  world.setOverview(null);
+  world.tick(1, 19, 0, 0);
+  assert.equal(world.overviewTopLevel, null);
+  assert.ok(Math.abs(world.cameraNode.position.x - 10.8) < 1e-9);
+  world.destroy();
+});
+
+test('overview backdrop moves behind the complete tower instead of hiding its lower blocks', () => {
+  const { world } = setup();
+  world.setOverview(27);
+  world.tick(1, 27, 0, 0);
+  const cameraDistance = Math.hypot(
+    world.cameraNode.position.x,
+    world.cameraNode.position.y - world.cameraCurrentY,
+    world.cameraNode.position.z,
+  );
+  const backgroundDistance = -world.backgroundNode.position.z;
+  assert.ok(backgroundDistance > cameraDistance);
+  assert.ok(world.camera.far > backgroundDistance);
+
+  world.setOverview(null);
+  world.tick(1, 27, 0, 0);
+  assert.equal(world.backgroundNode.position.z, -38);
+  world.destroy();
+});
+
+test('paused resize and overview refresh backdrop coverage without a simulation tick', () => {
+  const originalVisibleSize = cc.view.getVisibleSize;
+  const { world, base } = setup();
+  try {
+    cc.view.getVisibleSize = () => ({ width: 390 / 844 * 1334, height: 1334 });
+    world.setTheme({ ...theme, background: { texture: {}, rect: { width: 390, height: 844 } } });
+    world.spawnFragment({ ...base, x: 3, width: 1 }, 'x', 1);
+    const [fragment] = world.looseNodes.keys();
+    const fragmentPosition = { ...fragment.position };
+    const fragmentAge = world.looseNodes.get(fragment);
+    const portraitScale = { ...world.backgroundNode.scale };
+    const cameraCurrentY = world.cameraCurrentY;
+    let pulseUpdates = 0;
+    world.updatePerfectPulses = () => { pulseUpdates += 1; };
+    world.setPaused(true);
+
+    const assertCovered = () => {
+      const visible = cc.view.getVisibleSize();
+      const distance = -world.backgroundNode.position.z;
+      const requiredHeight = 2 * distance * Math.tan(world.camera.fov * Math.PI / 360);
+      assert.ok(world.backgroundNode.scale.y >= requiredHeight - 1e-8);
+      assert.ok(world.backgroundNode.scale.x >= requiredHeight * visible.width / visible.height - 1e-8);
+    };
+    cc.view.getVisibleSize = () => ({ width: 1920 / 1080 * 1334, height: 1334 });
+    world.setCompositionOffset(-4.3);
+    assert.ok(world.backgroundNode.scale.x > portraitScale.x * 3, 'landscape immediately replaces the narrow portrait backdrop');
+    assertCovered();
+
+    world.setOverview(27);
+    assert.ok(world.backgroundNode.position.z < -38, 'overview immediately moves the backdrop behind the tower');
+    assertCovered();
+
+    world.setTheme({ ...theme, background: { texture: {}, rect: { width: 1920, height: 1080 } } });
+    assert.ok(Math.abs(world.backgroundNode.scale.x / world.backgroundNode.scale.y - 1920 / 1080) < 1e-8,
+      'a new image aspect is applied even while paused');
+    assertCovered();
+    world.setOverview(null);
+    assert.equal(world.backgroundNode.position.z, -38);
+    assertCovered();
+
+    assert.equal(cc.PhysicsSystem.instance.enable, false);
+    assert.equal(world.paused, true);
+    assert.equal(world.cameraCurrentY, cameraCurrentY, 'render-only refresh does not advance camera following');
+    assert.equal(world.looseNodes.get(fragment), fragmentAge);
+    assert.deepEqual({ ...fragment.position }, fragmentPosition);
+    assert.equal(fragment.isValid, true);
+    assert.equal(pulseUpdates, 0);
+  } finally {
+    cc.view.getVisibleSize = originalVisibleSize;
+    world.destroy();
+  }
+});
+
 test('first offcut separates outward on either axis and retains a physical upward kick', () => {
   for (const axis of ['x', 'z']) {
     for (const direction of [-1, 1]) {
@@ -262,12 +443,146 @@ test('first offcut separates outward on either axis and retains a physical upwar
 });
 
 const gameSource = fs.readFileSync(path.join(__dirname, '../assets/scripts/StackGame.ts'), 'utf8');
+const webTemplate = fs.readFileSync(path.join(__dirname, '../build-templates/web-mobile/index.html'), 'utf8');
 const gameCompiled = ts.transpileModule(gameSource, { compilerOptions: {
   target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.CommonJS, experimentalDecorators: true,
 } }).outputText;
-const gameSandbox = { exports: {}, require: id => id === 'cc' ? cc : { StackWorld3D } };
+function loadLayoutModule() {
+  const runtime = { exports: {} };
+  const layoutSource = fs.readFileSync(path.join(__dirname, '../assets/scripts/ProjectorLayout.ts'), 'utf8');
+  vm.runInNewContext(ts.transpileModule(layoutSource, { compilerOptions: {
+    target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.CommonJS,
+  } }).outputText, runtime);
+  return runtime.exports;
+}
+const gameSandbox = { exports: {}, require: id => id === 'cc' ? cc
+  : id === './ProjectorLayout' ? loadLayoutModule() : { StackWorld3D } };
 vm.runInNewContext(gameCompiled, gameSandbox);
 const GamePrototype = gameSandbox.exports.StackGame.prototype;
+
+test('home button construction does not refresh focus before the start prompt exists', () => {
+  const start = gameSource.indexOf('private buildHomeButtons');
+  const end = gameSource.indexOf('private buildHomeOverlays', start);
+  const buildHomeButtonsSource = gameSource.slice(start, end);
+  assert.equal(buildHomeButtonsSource.includes('updateHomeMenuFocus()'), false);
+  assert.ok(gameSource.includes('|| !this.startPromptLabel)'));
+});
+
+test('web startup cover prevents the engine clear color from flashing before the themed frame', () => {
+  assert.match(webTemplate, /id="game-boot-cover"/);
+  assert.match(webTemplate, /body\.game-ready #GameCanvas/);
+  assert.match(webTemplate, /window\.addEventListener\('stack-game-ready'/);
+  assert.match(gameSource, /window\.dispatchEvent\(new Event\('stack-game-ready'\)\)/);
+  assert.match(gameSource, /this\.drawFrame\(\);\s*this\.notifyBrowserReady\(\);/);
+});
+
+test('home menu exposes default focus and remote direction, confirm, and back actions', () => {
+  const game = Object.create(GamePrototype);
+  let started = 0;
+  let opened = '';
+  let closed = 0;
+  Object.assign(game, {
+    phase: 'ready', homeTransition: null, homeOverlay: 'none', homeSelection: 0,
+    heldKeys: new Set(), updateHomeMenuFocus() {}, drawFrame() {}, toggleTestMode() {},
+    tryPrimaryAction() { started += 1; },
+    openHomeOverlay(overlay) { opened = overlay; this.homeOverlay = overlay; },
+    closeHomeOverlay() { closed += 1; this.homeOverlay = 'none'; },
+  });
+
+  game.handleKeyDownCode(cc.KeyCode.ARROW_DOWN);
+  assert.equal(game.homeSelection, 1);
+  game.heldKeys.delete(cc.KeyCode.ARROW_DOWN);
+  game.handleKeyDownCode(23);
+  assert.equal(opened, 'leaderboard');
+  assert.equal(started, 0);
+  game.heldKeys.delete(23);
+  game.homeOverlay = 'settings';
+  game.handleKeyDownCode(10009);
+  assert.equal(closed, 1);
+
+  game.heldKeys.delete(10009);
+  game.homeSelection = 0;
+  game.handleKeyDownCode(cc.KeyCode.ENTER);
+  assert.equal(started, 1);
+  game.handleKeyDownCode(66);
+  assert.equal(started, 1);
+});
+
+test('skin menu uses one continuous vertical focus order including return home', () => {
+  const game = Object.create(GamePrototype);
+  Object.assign(game, { skinSelection: 0, updateSkinShopUI() {} });
+
+  game.moveSkinSelection(0, -1);
+  assert.equal(game.skinSelection, 1);
+  game.moveSkinSelection(1, 0);
+  assert.equal(game.skinSelection, 2);
+  game.skinSelection = 6;
+  game.moveSkinSelection(0, -1);
+  assert.equal(game.skinSelection, 0);
+  game.moveSkinSelection(0, 1);
+  assert.equal(game.skinSelection, 6);
+});
+
+test('retained skin menu geometry keeps previews and text apart and respects legacy panel insets', () => {
+  const horizontalGap = (leftCenter, leftWidth, rightCenter, rightWidth) =>
+    rightCenter - rightWidth / 2 - (leftCenter + leftWidth / 2);
+  const verticalGap = (upperCenter, upperHeight, lowerCenter, lowerHeight) =>
+    upperCenter - upperHeight / 2 - (lowerCenter + lowerHeight / 2);
+
+  assert.ok(horizontalGap(-205, 82, -15, 250) >= 16);
+  assert.ok(horizontalGap(-205, 82, -5, 270) >= 16);
+  assert.ok(verticalGap(545, 86, 450, 56) >= 16);
+  // Live projector screen geometry is exercised through the actual controller
+  // in test-home-layout.cjs, not asserted against retired coordinate literals.
+
+  const game = Object.create(GamePrototype);
+  Object.assign(game, { wideLayout: true, tvLayout: false, visibleWidth: 1400 });
+  const panelCenter = game.panelCenterX();
+  assert.ok(panelCenter - 610 / 2 >= -1400 / 2 + 24);
+  game.wideLayout = false;
+  assert.equal(game.panelCenterX(), 0);
+});
+
+test('pause, failure and result use a full-tower overview and share the projector composition breakpoint', () => {
+  for (const [width, height, split] of [[1920, 1080, true], [1024, 768, true], [390, 844, false]]) {
+    const composition = [];
+    const overviews = [];
+    const homePresentation = [];
+    const game = Object.create(GamePrototype);
+    Object.assign(game, {
+      phase: 'falling', visibleWidth: width / height * 1334, visibleHeight: 1334, stack: [{ level: 12 }],
+      world3D: {
+        setHomePresentation(value) { homePresentation.push(value); },
+        setCompositionOffset(value) { composition.push(value); },
+        setOverview(value) { overviews.push(value); },
+      },
+    });
+    for (const phase of ['ready', 'paused', 'falling', 'gameover', 'playing', 'dropping']) {
+      game.phase = phase;
+      game.updateWorldComposition();
+    }
+    const offset = split ? -4.3 : 0;
+    assert.deepEqual(composition, [offset, offset, offset, offset, 0, 0], `${width}x${height}: active play is never side-shifted`);
+    assert.deepEqual(overviews, [null, 12, 12, 12, null, null]);
+    assert.deepEqual(homePresentation, [true, false, false, false, false, false]);
+  }
+});
+
+test('home framing adds presentation space, survives reset, and restores gameplay camera exactly', () => {
+  const { world } = setup();
+  const gameplay = { ...world.cameraNode.position };
+  world.setHomePresentation(true);
+  const home = { ...world.cameraNode.position };
+  assert.ok(Math.abs(home.z) > Math.abs(gameplay.z));
+  world.setPresentationOpacity(0);
+  world.reset();
+  assert.equal(world.homePresentation, true);
+  assert.equal(world.presentationOpacity, 0);
+  assert.deepEqual({ ...world.cameraNode.position }, home);
+  world.setHomePresentation(false);
+  assert.deepEqual({ ...world.cameraNode.position }, gameplay);
+  world.destroy();
+});
 
 test('perfect particles originate on the grown block contact perimeter, not its top', () => {
   const game = Object.create(GamePrototype);
@@ -297,7 +612,7 @@ test('all perfect frame waves project to the contact plane, including reduced mo
     const game = Object.create(GamePrototype);
     const heights = [];
     Object.assign(game, {
-      reducedMotion, perfectFrames: [], sparks: [], rings: [], cutSeams: [], visibleWidth: 750,
+      reducedMotion, perfectFrames: [], sparks: [], rings: [], visibleWidth: 750,
       project(x, z, level) { heights.push(level); return { x: (x - z) * 20, y: (x + z) * 10 + level * 30 }; },
     });
     const block = { x: 1, z: 2, width: 5, depth: 4.8, level: 12, hue: 60 };
@@ -351,36 +666,60 @@ function homeTransitionGame(phase = 'gameover', reducedMotion = false) {
   const game = Object.create(GamePrototype);
   let resets = 0;
   const pauses = [];
+  const opacities = [];
   Object.assign(game, {
-    phase, reducedMotion, restartLock: 0, homeTransition: null, coins: 64,
-    world3D: { setPaused(value) { pauses.push(value); } },
-    transitionGraphics: { node: { active: false } }, transitionOpacity: { opacity: 0 },
-    drawHomeTransition() {},
-    showReadyScreen() { resets += 1; this.phase = 'ready'; },
+    phase, reducedMotion, restartLock: 0, homeTransition: null, coins: 64, homeOverlay: 'none',
+    transitionViews: [], heldKeys: new Set(),
+    world3D: { setPaused(value) { pauses.push(value); }, setPresentationOpacity(value) { opacities.push(value); } },
+    transitionBlocker: { active: false }, effectsGraphics: { clear() {}, node: { active: true } },
+    currentSkin: () => ({ visualStyle: 'minimal' }), drawScreenDimmer(alpha) { this.dimAlpha = alpha; },
+    drawFrame() {},
+    showReadyScreen() { resets += 1; this.setScreen('ready'); },
+    setScreen(next, overlay = 'none') {
+      this.phase = next; this.homeOverlay = overlay;
+      this.startGroup.active = next === 'ready' && overlay === 'none';
+      this.settingsGroup.active = overlay === 'settings';
+      this.leaderboardGroup.active = overlay === 'leaderboard';
+      this.pauseGroup.active = next === 'paused'; this.resultGroup.active = next === 'gameover';
+      this.gameplayHudGroup.active = next !== 'ready';
+      this.pauseButton.active = next === 'playing';
+    },
   });
-  return { game, pauses, resetCount: () => resets };
+  for (const name of ['startGroup', 'settingsGroup', 'leaderboardGroup', 'pauseGroup', 'resultGroup', 'gameplayHudGroup', 'pauseButton']) {
+    game[name] = new Node(name); game[name].addComponent(Widget);
+  }
+  game.testModeBadgeLabel = { node: new Node('TestBadge') };
+  game.perfectLabel = { node: new Node('Perfect') };
+  game.testModeBadgeLabel.node.active = game.perfectLabel.node.active = false;
+  game.setScreen(phase);
+  return { game, pauses, opacities, resetCount: () => resets };
 }
 
-test('home return fades out, resets once behind cover, fades in and blocks repeated input', () => {
+test('home return fades the tower, resets once while invisible and blocks repeated input', () => {
   for (const phase of ['gameover', 'paused']) {
-    const { game, pauses, resetCount } = homeTransitionGame(phase);
+    const { game, pauses, opacities, resetCount } = homeTransitionGame(phase);
     game.returnToHome();
     const transition = game.homeTransition;
     game.returnToHome();
     assert.equal(game.homeTransition, transition);
     assert.deepEqual(pauses, [true]);
     assert.equal(game.consumeActionDebounce(), false);
-    game.updateHomeTransition(0.1);
-    assert.ok(game.transitionOpacity.opacity > 0 && game.transitionOpacity.opacity < 255);
+    game.updateHomeTransition(0.05);
+    assert.ok(opacities.at(-1) > 0 && opacities.at(-1) < 1);
     assert.equal(resetCount(), 0);
-    game.updateHomeTransition(0.1);
+    game.updateHomeTransition(0.05);
     assert.equal(resetCount(), 1);
-    assert.equal(game.transitionOpacity.opacity, 255);
-    game.updateHomeTransition(0.14);
-    assert.ok(game.transitionOpacity.opacity > 0 && game.transitionOpacity.opacity < 255);
-    game.updateHomeTransition(0.2);
+    assert.equal(opacities.at(-1), 0);
+    assert.equal(game.startGroup.getComponent(UIOpacity).opacity, 0);
+    assert.equal(game.startGroup.position.x, -24);
+    game.updateHomeTransition(0.08);
+    assert.ok(opacities.at(-1) > 0 && opacities.at(-1) < 1);
+    game.updateHomeTransition(0.081);
     assert.equal(game.homeTransition, null);
-    assert.equal(game.transitionGraphics.node.active, false);
+    assert.equal(game.transitionBlocker.active, false);
+    assert.equal(game.startGroup.position.x, 0);
+    assert.equal(game.startGroup.getComponent(Widget).enabled, true);
+    assert.equal(game.startGroup.getComponent(UIOpacity).opacity, 255);
     assert.equal(game.phase, 'ready');
     assert.equal(resetCount(), 1);
     assert.equal(game.coins, 64);
@@ -401,6 +740,101 @@ test('reduced motion skips home fade and large frame steps still complete exactl
   playing.game.returnToHome();
   assert.equal(playing.resetCount(), 0);
   assert.equal(playing.game.homeTransition, null);
+});
+
+test('starting a round waits for the tower fade and resumes physics only after reveal', () => {
+  const { game, pauses, opacities } = homeTransitionGame('ready');
+  let starts = 0;
+  Object.assign(game, { audioReady:true, homeOverlay:'none', updateAudioPrompt() {},
+    startGameImmediately() { assert.equal(opacities.at(-1), 0); starts += 1; this.setScreen('playing'); this.world3D.setPaused(false); } });
+  game.startGame(); game.startGame();
+  assert.equal(starts, 0);
+  game.updateHomeTransition(0.1);
+  assert.equal(starts, 1);
+  assert.equal(pauses[pauses.length - 1], true);
+  assert.equal(game.consumeActionDebounce(), false);
+  game.updateHomeTransition(0.16);
+  assert.equal(pauses[pauses.length - 1], false);
+  assert.equal(game.homeTransition, null);
+});
+
+test('menu opening and closing use one guarded transition and reduced motion skips it', () => {
+  const { game, opacities } = homeTransitionGame('ready');
+  Object.assign(game, { homeOverlay:'none',
+    openHomeOverlayImmediately(overlay) { this.setScreen('ready', overlay); },
+    closeHomeOverlayImmediately() { this.setScreen('ready'); } });
+  game.openHomeOverlay('leaderboard');
+  game.openHomeOverlay('settings');
+  assert.equal(game.homeOverlay, 'none');
+  game.updateHomeTransition(0.05);
+  assert.ok(game.startGroup.position.x < 0);
+  assert.ok(game.dimAlpha >= 18 && game.dimAlpha <= 51);
+  game.updateHomeTransition(0.05);
+  assert.equal(game.leaderboardGroup.position.x, 24);
+  assert.equal(opacities.length, 0, 'menu changes must not fade/reset the tower');
+  game.updateHomeTransition(0.16);
+  assert.equal(game.homeOverlay, 'leaderboard');
+  assert.equal(game.homeTransition, null);
+  game.closeHomeOverlay();
+  assert.equal(game.homeOverlay, 'leaderboard');
+  game.updateHomeTransition(0.32);
+  assert.equal(game.homeOverlay, 'none');
+  game.reducedMotion=true;
+  game.openHomeOverlay('settings');
+  assert.equal(game.homeOverlay, 'settings');
+  assert.equal(game.homeTransition, null);
+});
+
+test('backgrounding during start leaves the revealed round paused', () => {
+  const { game } = homeTransitionGame('ready');
+  Object.assign(game, { heldKeys:new Set([13]), pauseGame() { this.phase='paused'; } });
+  game.beginScreenTransition(() => { game.phase='playing'; });
+  game.onGameHide();
+  assert.equal(game.heldKeys.size, 0);
+  assert.equal(game.homeTransition, null, 'backgrounding must settle immediately rather than waiting for another frame');
+  game.updateHomeTransition(1);
+  assert.equal(game.phase, 'paused');
+  assert.equal(game.homeTransition, null);
+});
+
+test('resize settles navigation before layout and remote keys pressed in transition remain held', () => {
+  const { game } = homeTransitionGame('ready');
+  game.beginScreenTransition(() => game.setScreen('playing'));
+  game.handleKeyDownCode(13);
+  assert.equal(game.heldKeys.has(13), true);
+  game.resizeStage = () => {
+    assert.equal(game.homeTransition, null);
+    assert.equal(game.startGroup.position.x, 0);
+    assert.equal(game.startGroup.getComponent(Widget).enabled, true);
+  };
+  game.onCanvasResize();
+  game.handleKeyDownCode(13); // Would reach gameplay on a leaked held key.
+  assert.equal(game.heldKeys.has(13), true);
+});
+
+test('all theme transitions cap the dimmer and restore complete panel opacity/anchors', () => {
+  for (const skin of ['minimal-stack', 'classic', 'cyber-neon', 'porcelain-moon', 'pastel-toy', 'nature-zen']) {
+    const { game } = homeTransitionGame('ready');
+    delete game.currentSkin;
+    game.selectedSkinId = skin;
+    game.beginScreenTransition(() => game.setScreen('ready', 'settings'), 'menu-open');
+    for (let i = 0; i < 27; i++) {
+      game.updateHomeTransition(0.01);
+      assert.ok(game.dimAlpha >= 0 && game.dimAlpha <= 51, skin);
+    }
+    assert.equal(game.settingsGroup.getComponent(UIOpacity).opacity, 255, skin);
+    assert.equal(game.settingsGroup.position.x, 0, skin);
+    assert.equal(game.settingsGroup.getComponent(Widget).enabled, true, skin);
+  }
+});
+
+test('navigation has no full-screen cover renderer and panels own backgrounds with their content', () => {
+  assert.doesNotMatch(gameSource, /transitionGraphics|drawHomeTransition|animateMenuEntrance/);
+  for (const group of ['startGroup', 'pauseGroup', 'resultGroup']) {
+    assert.ok(gameSource.includes(`this.${group}.addComponent(Graphics)`), group);
+  }
+  const backdrop = gameSource.slice(gameSource.indexOf('private drawOverlayBackdrop'), gameSource.indexOf('private drawOverlayButton'));
+  assert.doesNotMatch(backdrop, /graphics\.rect\(/, 'modal panel must not carry a full-screen moving dimmer');
 });
 
 function loadSkinSave(entries = {}) {
@@ -494,7 +928,9 @@ test('reduced motion suppresses only the perfect visual pulse', () => {
   }
 });
 
-test('first cut conserves width/depth, marks the cut edge, and settles before spawning debris', () => {
+test('first cut conserves width/depth and settles before spawning debris without a seam overlay', () => {
+  assert.equal(gameSource.includes('cutSeams'), false);
+  assert.equal(gameSource.includes('spawnCutFeedback'), false);
   for (const axis of ['x', 'z']) {
     for (const delta of [-1.5, 1.5]) {
       const base = { x: 0, z: 0, width: 5, depth: 5, level: 0, hue: 60 };
@@ -504,7 +940,7 @@ test('first cut conserves width/depth, marks the cut edge, and settles before sp
       let offcut;
       Object.assign(game, {
         current: placed, stack: [base], phase: 'dropping', moveAxis: axis,
-        testModeEnabled: false, reducedMotion: true, fallingPieces: [], cutSeams: [], score: 0,
+        testModeEnabled: false, reducedMotion: true, fallingPieces: [], score: 0,
         resetPerfectChain() {}, addTrauma() {}, playCutSound() {}, setScore() {},
         world3D: {
           settle(block) { calls.push('settle'); assert.equal(block[axis === 'x' ? 'width' : 'depth'], 3.5); },
@@ -516,11 +952,6 @@ test('first cut conserves width/depth, marks the cut edge, and settles before sp
       const dimension = axis === 'x' ? 'width' : 'depth';
       assert.equal(placed[dimension] + offcut[dimension], 5);
       assert.equal(game.spawnDelay, 0.24);
-      assert.equal(game.cutSeams.length, 1);
-      const seam = game.cutSeams[0];
-      assert.equal(seam[axis + '1'], Math.sign(delta) * 2.5);
-      assert.equal(seam[axis + '2'], Math.sign(delta) * 2.5);
-      assert.equal(seam.life, 0.36);
     }
   }
 });
