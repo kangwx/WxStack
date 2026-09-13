@@ -8,6 +8,7 @@ import {
   Component,
   director,
   Director,
+  EditBox,
   EventGamepad,
   EventKeyboard,
   game,
@@ -23,6 +24,7 @@ import {
   ResolutionPolicy,
   resources,
   SafeArea,
+  ScrollView,
   screen,
   Sprite,
   SpriteFrame,
@@ -31,14 +33,18 @@ import {
   Tween,
   UITransform,
   UIOpacity,
+  Vec2,
   Vec3,
   view,
   Widget,
 } from 'cc';
 import { StackWorld3D, StackWorldTheme } from './StackWorld3D';
 import { androidGameKey, browserGameKey } from './RemoteInput';
-import { LeaderboardEntry, LeaderboardRepository, LocalLeaderboardRepository } from './Leaderboard';
-import { projectorHudLayout, projectorPanelLayout } from './ProjectorLayout';
+import {
+  DEFAULT_NICKNAME, LeaderboardEntry, LeaderboardRepository, LocalLeaderboardRepository,
+  NICKNAME_MAX_LENGTH, leaderboardTitle, loadNickname, normalizeNickname, saveNickname,
+} from './Leaderboard';
+import { projectorHudLayout, projectorLeaderboardPreviewLayout, projectorPanelLayout } from './ProjectorLayout';
 
 const { ccclass } = _decorator;
 
@@ -63,7 +69,7 @@ const HOME_FADE_OUT_SECONDS = 0.1;
 const HOME_FADE_IN_SECONDS = 0.16;
 const MENU_SLIDE_DISTANCE = 24;
 const MENU_DIMMER_MAX_ALPHA = 51;
-type ScreenTransitionKind = 'menu-open' | 'menu-close' | 'game-start' | 'home-return';
+type ScreenTransitionKind = 'menu-open' | 'menu-close' | 'leaderboard-open' | 'leaderboard-close' | 'game-start' | 'home-return';
 const WIDE_LAYOUT_MIN_ASPECT = 1.35;
 const WIDE_LAYOUT_MIN_FRAME_WIDTH = 1024;
 const TV_LAYOUT_MIN_ASPECT = 1.45;
@@ -460,6 +466,9 @@ export class StackGame extends Component {
   private bestCaptionLabel!: Label;
   private scoreLabel!: Label;
   private bestLabel!: Label;
+  private recordGapNode!: Node;
+  private recordGapGraphics!: Graphics;
+  private recordGapLabel!: Label;
   private homeBestLabel!: Label;
   private testModeBadgeLabel!: Label;
   private perfectLabel!: Label;
@@ -481,6 +490,7 @@ export class StackGame extends Component {
   private homeBestCaption!: Label;
   private homeCoinCaption!: Label;
   private homeTransition: {
+    kind: ScreenTransitionKind;
     elapsed: number; swapped: boolean; swap: () => void;
     outSeconds: number; inSeconds: number; pauseOnComplete: boolean;
     direction: number; fadeWorld: boolean; fromDim: number; toDim: number;
@@ -518,11 +528,35 @@ export class StackGame extends Component {
   private leaderboardButton!: Node;
   private leaderboardButtonGraphics!: Graphics;
   private leaderboardButtonLabel!: Label;
+  private homeLeaderboardPreview!: Node;
+  private homeLeaderboardPreviewGraphics!: Graphics;
+  private homeLeaderboardPreviewTitle!: Label;
+  private homeLeaderboardPreviewHint!: Label;
+  private homeLeaderboardPreviewEmpty!: Label;
+  private homeLeaderboardPreviewRows: Label[] = [];
+  private homeLeaderboardPreviewDetails: Label[] = [];
+  private homeLeaderboardPreviewEntries: LeaderboardEntry[] = [];
+  private homeLeaderboardPreviewRequest = 0;
   private settingsGroup!: Node;
   private settingsGraphics!: Graphics;
   private soundToggle!: ButtonUI;
   private motionToggle!: ButtonUI;
   private settingsCloseButton!: ButtonUI;
+  private nicknameButton!: ButtonUI;
+  private nicknameLabel!: Label;
+  private nicknameGroup!: Node;
+  private nicknameGraphics!: Graphics;
+  private nicknameEditor!: EditBox;
+  private nicknameInputGraphics!: Graphics;
+  private nicknameHint!: Label;
+  private nicknameSaveButton!: ButtonUI;
+  private nicknameCancelButton!: ButtonUI;
+  private nicknameEditing = false;
+  private nicknameInputActive = false;
+  private nicknameSelection = 0;
+  private playerNickname = DEFAULT_NICKNAME;
+  private roundNickname = DEFAULT_NICKNAME;
+  private nicknameStatus = '';
   private skinsGroup!: Node;
   private skinsGraphics!: Graphics;
   private skinsCoinLabel!: Label;
@@ -537,12 +571,15 @@ export class StackGame extends Component {
   private leaderboardStatus!: Label;
   private leaderboardEmpty!: Label;
   private leaderboardPageLabel!: Label;
-  private leaderboardRows: { node: Node; graphics: Graphics; rank: Label; score: Label; detail: Label }[] = [];
+  private leaderboardRows: { node: Node; graphics: Graphics; rank: Label; player: Label; score: Label; title: Label; detail: Label }[] = [];
+  private leaderboardScroll!: ScrollView;
+  private leaderboardViewport!: Node;
+  private leaderboardContent!: Node;
+  private leaderboardScrollTrack!: Graphics;
+  private leaderboardScrollTarget = 0;
   private leaderboardButtons: ButtonUI[] = [];
   private leaderboardHandlers: (() => void)[] = [];
   private leaderboardEntries: LeaderboardEntry[] = [];
-  private leaderboardPage = 0;
-  private leaderboardSelection = 2;
   private leaderboardRequest = 0;
   private leaderboardLoading = false;
   private roundId = '';
@@ -561,6 +598,7 @@ export class StackGame extends Component {
 
   private score = 0;
   private bestScore = 0;
+  private roundBestScore = 0;
   private perfectStreak = 0;
   private perfectToneStep = 0;
   private roundPerfectCount = 0;
@@ -612,6 +650,7 @@ export class StackGame extends Component {
   private audioReady = false;
   private browserReadyNotified = false;
   private readonly focusGameCanvas = (): void => {
+    if (this.nicknameInputActive) return;
     const canvas = document.getElementById('GameCanvas');
     if (canvas && !document.hidden) {
       canvas.setAttribute('tabindex', '0');
@@ -625,11 +664,31 @@ export class StackGame extends Component {
     if (action === 1) this.heldKeys.delete(normalized);
     else if (!repeat) {
       this.heldKeys.delete(normalized);
-      this.handleKeyDownCode(normalized);
+      // A host-forwarded remote key never reaches the native text input.
+      if (this.nicknameEditing && this.nicknameInputActive && normalized === KeyCode.ENTER) this.onNicknameInputReturn();
+      else if (this.nicknameEditing && this.nicknameInputActive
+          && [KeyCode.ARROW_UP, KeyCode.ARROW_DOWN, KeyCode.ARROW_LEFT, KeyCode.ARROW_RIGHT].indexOf(normalized) >= 0) {
+        this.moveNicknameSelection(normalized === KeyCode.ARROW_UP || normalized === KeyCode.ARROW_LEFT ? -1 : 1);
+      } else this.handleKeyDownCode(normalized);
     }
     return true;
   };
   private readonly onBrowserRemoteKeyDown = (event: KeyboardEvent): void => {
+    if (this.nicknameEditing) {
+      if (event.isComposing || event.keyCode === 229) {
+        // Let the IME commit text, but keep Cocos's Enter listener from ending composition.
+        event.stopImmediatePropagation();
+        return;
+      }
+      if (event.key === 'Escape' || event.key === 'Tab') {
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        if (event.key === 'Escape') this.closeNicknameEditor();
+        else this.moveNicknameSelection(event.shiftKey ? -1 : 1);
+        return;
+      }
+      if (this.nicknameInputActive) return;
+    }
     const keyCode = browserGameKey(event, /Android/i.test(navigator.userAgent));
     if (!keyCode || event.altKey || event.ctrlKey || event.metaKey) {
       return;
@@ -643,6 +702,10 @@ export class StackGame extends Component {
   };
   private readonly onBrowserRemoteKeyUp = (event: KeyboardEvent): void => {
     const keyCode = browserGameKey(event, /Android/i.test(navigator.userAgent));
+    if (this.nicknameEditing) {
+      if (keyCode) this.heldKeys.delete(keyCode);
+      return;
+    }
     if (keyCode) {
       event.preventDefault();
       event.stopImmediatePropagation();
@@ -673,9 +736,16 @@ export class StackGame extends Component {
     this.resultRestartButton.node.on(Button.EventType.CLICK, this.tryRestartAction, this);
     this.settingsButton.on(Button.EventType.CLICK, this.onSettingsButton, this);
     this.leaderboardButton.on(Button.EventType.CLICK, this.onLeaderboardButton, this);
+    this.homeLeaderboardPreview.on(Button.EventType.CLICK, this.onLeaderboardButton, this);
     this.soundToggle.node.on(Button.EventType.CLICK, this.onSoundToggle, this);
     this.motionToggle.node.on(Button.EventType.CLICK, this.onMotionToggle, this);
     this.settingsCloseButton.node.on(Button.EventType.CLICK, this.onCloseHomeOverlay, this);
+    this.nicknameButton.node.on(Button.EventType.CLICK, this.openNicknameEditor, this);
+    this.nicknameSaveButton.node.on(Button.EventType.CLICK, this.saveNicknameEditor, this);
+    this.nicknameCancelButton.node.on(Button.EventType.CLICK, this.closeNicknameEditor, this);
+    this.nicknameEditor.node.on(EditBox.EventType.EDITING_DID_BEGAN, this.onNicknameInputBegan, this);
+    this.nicknameEditor.node.on(EditBox.EventType.EDITING_DID_ENDED, this.onNicknameInputEnded, this);
+    this.nicknameEditor.node.on(EditBox.EventType.EDITING_RETURN, this.onNicknameInputReturn, this);
     for (const skinId of SKIN_IDS) {
       const card = this.skinCards.get(skinId);
       const handler = this.skinCardHandlers.get(skinId);
@@ -700,7 +770,7 @@ export class StackGame extends Component {
       window.addEventListener('blur', this.clearBrowserKeys);
       document.addEventListener('visibilitychange', this.clearBrowserKeys);
       document.addEventListener('visibilitychange', this.focusGameCanvas);
-      (window as any).WxStackRemote = { dispatchKey: this.onAndroidRemoteKey };
+      (window as any).WxStackRemote = { dispatchKey: this.onAndroidRemoteKey, isTextEditing: () => this.nicknameInputActive };
       this.focusGameCanvas();
     }
   }
@@ -717,9 +787,19 @@ export class StackGame extends Component {
     this.resultRestartButton.node.off(Button.EventType.CLICK, this.tryRestartAction, this);
     this.settingsButton.off(Button.EventType.CLICK, this.onSettingsButton, this);
     this.leaderboardButton.off(Button.EventType.CLICK, this.onLeaderboardButton, this);
+    this.homeLeaderboardPreview.off(Button.EventType.CLICK, this.onLeaderboardButton, this);
+    this.homeLeaderboardPreviewRequest += 1;
     this.soundToggle.node.off(Button.EventType.CLICK, this.onSoundToggle, this);
     this.motionToggle.node.off(Button.EventType.CLICK, this.onMotionToggle, this);
     this.settingsCloseButton.node.off(Button.EventType.CLICK, this.onCloseHomeOverlay, this);
+    this.nicknameButton.node.off(Button.EventType.CLICK, this.openNicknameEditor, this);
+    this.nicknameSaveButton.node.off(Button.EventType.CLICK, this.saveNicknameEditor, this);
+    this.nicknameCancelButton.node.off(Button.EventType.CLICK, this.closeNicknameEditor, this);
+    this.nicknameEditor.node.off(EditBox.EventType.EDITING_DID_BEGAN, this.onNicknameInputBegan, this);
+    this.nicknameEditor.node.off(EditBox.EventType.EDITING_DID_ENDED, this.onNicknameInputEnded, this);
+    this.nicknameEditor.node.off(EditBox.EventType.EDITING_RETURN, this.onNicknameInputReturn, this);
+    this.nicknameEditor.blur();
+    this.nicknameInputActive = false;
     for (const skinId of SKIN_IDS) {
       const card = this.skinCards.get(skinId);
       const handler = this.skinCardHandlers.get(skinId);
@@ -891,6 +971,7 @@ export class StackGame extends Component {
     this.bestCaptionLabel.node.setPosition(0, 30, 0);
     this.bestLabel = this.makeLabel('Best', this.bestHudCard, '0', 40, new Color(255, 255, 255, 235), 126, 58);
     this.bestLabel.node.setPosition(0, -12, 0);
+    this.buildRecordGapHud();
     this.gameplayHudGroup.active = false;
 
     this.testModeBadgeLabel = this.makeLabel('TestModeBadge', this.hudSafeRoot, COPY.testing, 24, new Color(255, 255, 255, 235), 132, 52);
@@ -927,6 +1008,7 @@ export class StackGame extends Component {
     this.anchorCenter(this.startButton, 0, 0);
     this.controlsLabel = this.makeCenteredLabel('Controls', this.startGroup, COPY.controls, 24, -350, 560, 56, new Color(255, 255, 255, 185));
     this.precisionTipLabel = this.makeCenteredLabel('PrecisionTip', this.startGroup, COPY.precision, 22, -425, 560, 56, new Color(255, 255, 255, 155));
+    this.buildHomeLeaderboardPreview();
 
     this.resultGroup = this.makeFullNode('ResultScreen', this.hudSafeRoot);
     this.resultPanelGraphics = this.resultGroup.addComponent(Graphics);
@@ -985,6 +1067,94 @@ export class StackGame extends Component {
     );
   }
 
+  private buildHomeLeaderboardPreview(): void {
+    this.homeLeaderboardPreview = this.makeNode('HomeLeaderboardPreview', this.startGroup);
+    this.homeLeaderboardPreview.addComponent(UITransform);
+    this.anchorCenter(this.homeLeaderboardPreview, 0, 0);
+    this.homeLeaderboardPreviewGraphics = this.homeLeaderboardPreview.addComponent(Graphics);
+    this.homeLeaderboardPreview.addComponent(Button).transition = Button.Transition.NONE;
+    this.homeLeaderboardPreviewTitle = this.makeLabel('PreviewTitle', this.homeLeaderboardPreview,
+      '排行榜 →', 34, Color.WHITE, 312, 44);
+    this.homeLeaderboardPreviewTitle.isBold = true;
+    for (let index = 0; index < 3; index += 1) {
+      const row = this.makeLabel(`PreviewRank-${index}`, this.homeLeaderboardPreview, '', 36, Color.WHITE, 312, 48);
+      row.horizontalAlign = Label.HorizontalAlign.LEFT;
+      this.homeLeaderboardPreviewRows.push(row);
+      const detail = this.makeLabel(`PreviewPlayer-${index}`, this.homeLeaderboardPreview, '', 22, Color.WHITE, 312, 28);
+      detail.horizontalAlign = Label.HorizontalAlign.LEFT;
+      this.homeLeaderboardPreviewDetails.push(detail);
+    }
+    this.homeLeaderboardPreviewEmpty = this.makeLabel('PreviewEmpty', this.homeLeaderboardPreview,
+      '正在加载…', 24, Color.WHITE, 312, 70);
+    this.homeLeaderboardPreviewHint = this.makeLabel('PreviewHint', this.homeLeaderboardPreview,
+      '按 → 或点击展开', 24, Color.WHITE, 312, 34);
+  }
+
+  private updateHomeLeaderboardPreviewUI(): void {
+    if (!this.homeLeaderboardPreview) return;
+    const layout = projectorLeaderboardPreviewLayout(this.visibleWidth, this.visibleHeight);
+    const compact = layout.rowYs.length === 1;
+    const skin = this.currentSkin();
+    const text = this.textOnButton(skin.panelColor);
+    const g = this.homeLeaderboardPreviewGraphics;
+    g.clear();
+    g.fillColor = this.rgb(skin.panelColor);
+    g.roundRect(-layout.panelWidth / 2, -layout.panelHeight / 2, layout.panelWidth, layout.panelHeight, compact ? 16 : 28);
+    g.fill();
+    g.lineWidth = 2;
+    g.strokeColor = this.rgb(skin.accentColor);
+    g.roundRect(-layout.panelWidth / 2 + 2, -layout.panelHeight / 2 + 2,
+      layout.panelWidth - 4, layout.panelHeight - 4, compact ? 14 : 26);
+    g.stroke();
+    const place = (label: Label, y: number, size: number, height: number) => {
+      label.node.setPosition(0, y, 0);
+      label.node.getComponent(UITransform)?.setContentSize(layout.panelWidth - (compact ? 24 : 48), height);
+      label.fontSize = size;
+      label.lineHeight = Math.round(size * 1.2);
+      label.enableWrapText = false;
+      label.color = text;
+    };
+    this.setCenteredNodeLayout(this.homeLeaderboardPreview, layout.panelX, layout.panelY);
+    this.homeLeaderboardPreview.getComponent(UITransform)?.setContentSize(layout.panelWidth, layout.panelHeight);
+    place(this.homeLeaderboardPreviewTitle, layout.titleY, layout.titleSize, compact ? 30 : 48);
+    this.homeLeaderboardPreviewRows.forEach((row, index) => {
+      const entry = this.homeLeaderboardPreviewEntries[index];
+      row.node.active = !!entry && index < layout.rowYs.length;
+      row.string = entry ? `${index + 1}  ·  ${entry.score} 层` : '';
+      place(row, (layout.rowYs[index] ?? 0) + (compact ? 0 : 10), compact ? layout.scoreSize : 30, compact ? 30 : 36);
+      row.horizontalAlign = compact ? Label.HorizontalAlign.CENTER : Label.HorizontalAlign.LEFT;
+      const detail = this.homeLeaderboardPreviewDetails[index];
+      detail.node.active = !!entry && !compact;
+      detail.string = entry ? `${entry.nickname || '本地玩家'} · ${leaderboardTitle(entry.score)}` : '';
+      place(detail, (layout.rowYs[index] ?? 0) - 24, 22, 26);
+    });
+    this.homeLeaderboardPreviewEmpty.node.active = this.homeLeaderboardPreviewEntries.length === 0;
+    place(this.homeLeaderboardPreviewEmpty, compact ? layout.rowYs[0] : 0, layout.captionSize, compact ? 30 : 70);
+    this.homeLeaderboardPreviewHint.node.active = !compact;
+    place(this.homeLeaderboardPreviewHint, layout.hintY, layout.captionSize, 34);
+  }
+
+  private async loadHomeLeaderboardPreview(): Promise<void> {
+    if (!this.homeLeaderboardPreview) return;
+    const request = ++this.homeLeaderboardPreviewRequest;
+    this.homeLeaderboardPreviewEmpty.string = '正在加载…';
+    this.updateHomeLeaderboardPreviewUI();
+    const stillHome = () => this.isValid && request === this.homeLeaderboardPreviewRequest
+      && this.phase === 'ready' && this.homeOverlay === 'none';
+    try {
+      await this.leaderboardSubmission;
+      const snapshot = await this.leaderboard.list();
+      if (!stillHome()) return;
+      this.homeLeaderboardPreviewEntries = snapshot.entries.slice(0, 3);
+      this.homeLeaderboardPreviewEmpty.string = '暂无成绩，等你上榜';
+    } catch {
+      if (!stillHome()) return;
+      this.homeLeaderboardPreviewEntries = [];
+      this.homeLeaderboardPreviewEmpty.string = '暂不可用，点击重试';
+    }
+    this.updateHomeLeaderboardPreviewUI();
+  }
+
   private buildHomeOverlays(): void {
     this.settingsGroup = this.makeFullNode('SettingsScreen', this.hudSafeRoot);
     this.settingsGraphics = this.settingsGroup.addComponent(Graphics);
@@ -994,8 +1164,11 @@ export class StackGame extends Component {
     this.soundToggle = this.makeOverlayButton(this.settingsGroup, 'SoundToggle', '', 500, 104, 0, 65);
     this.motionToggle = this.makeOverlayButton(this.settingsGroup, 'MotionToggle', '', 500, 104, 0, -70);
     this.buildTestModeToggle();
+    this.nicknameButton = this.makeOverlayButton(this.settingsGroup, 'NicknameButton', '修改昵称', 500, 104, 0, -282);
+    this.nicknameLabel = this.makeLabel('CurrentNickname', this.nicknameButton.node, this.playerNickname, 25, Color.WHITE, 360, 30);
     this.settingsCloseButton = this.makeOverlayButton(this.settingsGroup, 'SettingsClose', COPY.close, 400, 92, 0, -250);
     this.settingsGroup.active = false;
+    this.buildNicknameEditor();
 
     this.skinsGroup = this.makeFullNode('SkinsScreen', this.hudSafeRoot);
     this.skinsGraphics = this.skinsGroup.addComponent(Graphics);
@@ -1041,115 +1214,260 @@ export class StackGame extends Component {
     this.makeCenteredLabel('LeaderboardTitle', this.leaderboardGroup, COPY.leaderboard, 54, 450, 520, 82, Color.WHITE);
     this.leaderboardStatus = this.makeCenteredLabel('LeaderboardStatus', this.leaderboardGroup, '本机 Top 10 · 每局成绩', 24, 377, 530, 52, Color.WHITE);
     this.makeCenteredLabel('LeaderboardRankHeading', this.leaderboardGroup, '排名', 23, 310, 74, 42, Color.WHITE);
-    const columns = this.makeCenteredLabel('LeaderboardColumns', this.leaderboardGroup, '层数 / 完美次数', 23, 310, 390, 42, Color.WHITE);
+    const columns = this.makeCenteredLabel('LeaderboardColumns', this.leaderboardGroup, '玩家 / 段位', 23, 310, 390, 42, Color.WHITE);
     columns.horizontalAlign = Label.HorizontalAlign.LEFT;
-    for (let index = 0; index < 5; index += 1) {
-      const node = this.makeNode(`LeaderboardRow-${index}`, this.leaderboardGroup);
+    this.makeCenteredLabel('LeaderboardScoreHeading', this.leaderboardGroup, '叠高 / 层', 23, 310, 180, 42, Color.WHITE);
+    this.leaderboardViewport = this.makeNode('LeaderboardViewport', this.leaderboardGroup);
+    this.leaderboardViewport.addComponent(UITransform).setContentSize(520, 768);
+    this.leaderboardViewport.addComponent(MaskComponent).type = MaskComponent.Type.GRAPHICS_RECT;
+    this.leaderboardContent = this.makeNode('LeaderboardContent', this.leaderboardViewport);
+    const contentTransform = this.leaderboardContent.addComponent(UITransform);
+    contentTransform.setAnchorPoint(0.5, 1);
+    contentTransform.setContentSize(520, 1584);
+    this.leaderboardScroll = this.leaderboardViewport.addComponent(ScrollView);
+    this.leaderboardScroll.content = this.leaderboardContent;
+    this.leaderboardScroll.horizontal = false;
+    this.leaderboardScroll.vertical = true;
+    this.leaderboardScroll.elastic = false;
+    this.leaderboardScroll.inertia = true;
+    this.leaderboardScroll.brake = 0.65;
+    this.leaderboardScroll.cancelInnerEvents = true;
+    const track = this.makeNode('LeaderboardScrollTrack', this.leaderboardGroup);
+    track.addComponent(UITransform);
+    this.leaderboardScrollTrack = track.addComponent(Graphics);
+    this.leaderboardViewport.on(ScrollView.EventType.SCROLLING, this.updateLeaderboardScrollTrack, this);
+    for (let index = 0; index < 10; index += 1) {
+      const node = this.makeNode(`LeaderboardRow-${index}`, this.leaderboardContent);
       node.addComponent(UITransform).setContentSize(520, 82);
-      this.anchorCenter(node, 0, 235 - index * 95);
       const graphics = node.addComponent(Graphics);
       const rank = this.makeLabel('Rank', node, '', 36, Color.WHITE, 74, 62);
       rank.isBold = true;
       rank.node.setPosition(-209, 0, 0);
+      const player = this.makeLabel('Player', node, '', 24, Color.WHITE, 390, 30);
+      player.horizontalAlign = Label.HorizontalAlign.LEFT;
       const score = this.makeLabel('Score', node, '', 30, Color.WHITE, 390, 40);
       score.isBold = true;
-      score.horizontalAlign = Label.HorizontalAlign.LEFT;
+      score.horizontalAlign = Label.HorizontalAlign.CENTER;
       score.node.setPosition(43, 19, 0);
       const detail = this.makeLabel('Detail', node, '', 21, Color.WHITE, 390, 32);
       detail.horizontalAlign = Label.HorizontalAlign.LEFT;
       detail.node.setPosition(43, -22, 0);
-      this.leaderboardRows.push({ node, graphics, rank, score, detail });
+      const title = this.makeLabel('Title', node, '', 26, Color.WHITE, 390, 36);
+      title.horizontalAlign = Label.HorizontalAlign.LEFT;
+      this.leaderboardRows.push({ node, graphics, rank, player, score, title, detail });
     }
     this.leaderboardEmpty = this.makeCenteredLabel('LeaderboardEmpty', this.leaderboardGroup, '', 30, 80, 520, 160, Color.WHITE);
-    this.leaderboardPageLabel = this.makeCenteredLabel('LeaderboardPage', this.leaderboardGroup, '', 22, -232, 520, 38, Color.WHITE);
-    ['上一页', '下一页', COPY.close].forEach((text, index) => {
-      this.leaderboardButtons.push(this.makeOverlayButton(this.leaderboardGroup, `LeaderboardAction-${index}`, text, 390, 66, 0, -310 - index * 90));
-      this.leaderboardHandlers.push(() => {
-        this.leaderboardSelection = index;
-        this.activateLeaderboardSelection();
-      });
-    });
+    this.leaderboardPageLabel = this.makeCenteredLabel('LeaderboardScrollHint', this.leaderboardGroup, '', 22, -538, 520, 38, Color.WHITE);
+    this.leaderboardButtons.push(this.makeOverlayButton(this.leaderboardGroup, 'LeaderboardClose', '×', 76, 76, 0, 0));
+    this.leaderboardHandlers.push(() => this.closeHomeOverlay());
     this.leaderboardGroup.active = false;
   }
 
   private updateLeaderboardUI(): void {
     if (!this.leaderboardGraphics) return;
     const layout = this.panelLayout('leaderboard');
-    this.drawProjectorPanel(this.leaderboardGraphics, layout);
-    const text = this.textOnButton(this.currentSkin().panelColor);
-    for (const name of ['LeaderboardTitle', 'LeaderboardStatus', 'LeaderboardRankHeading', 'LeaderboardColumns', 'LeaderboardEmpty', 'LeaderboardPage']) {
-      this.setNamedLabelColor(this.leaderboardGroup, name, text);
+    this.drawLeaderboardPanel();
+    const text = new Color(240, 250, 249, 255);
+    for (const name of ['LeaderboardTitle', 'LeaderboardStatus', 'LeaderboardRankHeading', 'LeaderboardColumns', 'LeaderboardScoreHeading', 'LeaderboardEmpty', 'LeaderboardScrollHint']) {
+      this.setNamedLabelColor(this.leaderboardGroup, name, name === 'LeaderboardTitle' || name === 'LeaderboardEmpty'
+        ? text : new Color(181, 212, 217, 255));
     }
-    const pages = Math.max(1, Math.ceil(this.leaderboardEntries.length / 5));
-    this.leaderboardPage = Math.max(0, Math.min(this.leaderboardPage, pages - 1));
+    // Decorative divider and accent underline keep the header distinct from the moving list.
+    const panel = this.leaderboardGraphics;
+    panel.fillColor = new Color(148, 232, 207, 255);
+    panel.roundRect(-layout.contentWidth / 2, layout.subtitleY - 5, 68, 10, 5);
+    panel.fill();
+    panel.fillColor = new Color(text.r, text.g, text.b, 28);
+    panel.rect(-layout.contentWidth / 2, layout.listTop + 9, layout.contentWidth, 1);
+    panel.fill();
     this.leaderboardRows.forEach((row, index) => {
-      const rank = this.leaderboardPage * 5 + index;
+      const rank = index;
       const entry = this.leaderboardEntries[rank];
       row.node.active = !!entry && !this.leaderboardLoading;
       if (!entry) return;
       const currentRound = entry.id === this.submittedRoundId;
       row.graphics.clear();
-      row.graphics.fillColor = new Color(text.r, text.g, text.b, currentRound ? 32 : 16);
-      row.graphics.roundRect(-layout.rowWidth / 2, -layout.rowHeight / 2, layout.rowWidth, layout.rowHeight, 18);
-      row.graphics.fill();
-      row.graphics.strokeColor = new Color(text.r, text.g, text.b, currentRound ? 230 : 66);
+      this.drawLeaderboardGradient(row.graphics, -layout.rowWidth / 2, -layout.rowHeight / 2,
+        layout.rowWidth, layout.rowHeight, 18, currentRound ? [48, 99, 101] : [39, 83, 87], [28, 65, 69]);
+      row.graphics.strokeColor = currentRound ? new Color(148, 232, 207, 255) : new Color(112, 182, 179, 80);
       row.graphics.lineWidth = currentRound ? 3 : 1;
       row.graphics.roundRect(-layout.rowWidth / 2, -layout.rowHeight / 2, layout.rowWidth, layout.rowHeight, 18);
       row.graphics.stroke();
       // A numbered medal keeps the first three places distinct without relying on color alone.
       if (rank < 3) {
-        row.graphics.fillColor = this.rgb(this.currentSkin().accentColor);
-        row.graphics.roundRect(layout.rankX - 29, -29, 58, 58, 18);
-        row.graphics.fill();
+        this.drawLeaderboardMedal(row.graphics, layout.rankX, rank);
       }
-      row.rank.string = `${rank + 1}`;
-      row.score.string = `${entry.score} 层${currentRound ? '  · 本局' : ''}`;
+      row.rank.string = rank < 9 ? `0${rank + 1}` : `${rank + 1}`;
+      row.player.string = `${entry.nickname || '本地玩家'}${currentRound ? ' · 本局' : ''}`;
+      row.score.string = `${entry.score}`;
+      row.title.string = leaderboardTitle(entry.score);
       if (entry.kind === 'legacy') row.detail.string = '历史纪录 · 详情未记录';
       else {
         const date = new Date(entry.finishedAt!);
         const pad = (value: number) => value < 10 ? `0${value}` : `${value}`;
         row.detail.string = `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}  · 完美 ${entry.perfectCount} 次`;
       }
-      row.rank.color = rank < 3 ? this.textOnButton(this.currentSkin().accentColor) : text;
+      row.rank.color = rank < 3 ? new Color(56, 46, 31, 255) : new Color(168, 201, 207, 255);
       row.score.color = text;
-      row.detail.color = new Color(text.r, text.g, text.b, 225);
+      row.player.color = text;
+      row.title.color = new Color(249, 222, 149, 255);
+      row.title.isBold = true;
+      row.detail.color = new Color(191, 216, 221, 255);
     });
     this.leaderboardEmpty.node.active = this.leaderboardLoading || this.leaderboardEntries.length === 0;
-    this.leaderboardPageLabel.string = this.leaderboardLoading ? '' : `${this.leaderboardPage + 1} / ${pages}`;
-    this.leaderboardButtons.forEach((button, index) => {
-      const enabled = this.leaderboardActionEnabled(index);
-      button.node.getComponent(Button).interactable = enabled;
-      this.drawOverlayButton(button, layout.buttonWidth, layout.buttonHeight, this.homeOverlay === 'leaderboard' && this.leaderboardSelection === index, index === 2);
-      const opacity = button.node.getComponent(UIOpacity) ?? button.node.addComponent(UIOpacity);
-      opacity.opacity = enabled ? 255 : 125;
+    this.leaderboardPageLabel.string = this.leaderboardLoading ? '' : this.leaderboardEntries.length > 4
+      ? '↑ ↓ 滚动  ·  滑动 / 滚轮  ·  返回键关闭' : '本机成绩  ·  返回键关闭';
+    this.leaderboardButtons.forEach(button => {
+      button.graphics.clear();
+      button.label.string = '';
+      button.graphics.strokeColor = new Color(148, 232, 207, 255);
+      button.graphics.lineWidth = 4;
+      button.graphics.moveTo(-17, -17);
+      button.graphics.lineTo(17, 17);
+      button.graphics.moveTo(-17, 17);
+      button.graphics.lineTo(17, -17);
+      button.graphics.stroke();
     });
+    this.layoutLeaderboardList();
   }
 
-  private leaderboardActionEnabled(index: number): boolean {
-    if (index === 2) return true;
-    if (this.leaderboardLoading) return false;
-    return index === 0 ? this.leaderboardPage > 0 : (this.leaderboardPage + 1) * 5 < this.leaderboardEntries.length;
+  /** Opaque rounded gradient: short horizontal bands avoid bitmap assets and scale cleanly on TVs. */
+  private drawLeaderboardGradient(g: Graphics, x: number, y: number, width: number, height: number,
+    radius: number, top: number[], bottom: number[]): void {
+    const steps = 40;
+    for (let i = 0; i < steps; i++) {
+      const t = i / (steps - 1);
+      const band = height / steps;
+      const edge = Math.min((i + 0.5) * band, height - (i + 0.5) * band);
+      const inset = edge < radius ? radius - Math.sqrt(Math.max(0, radius * radius - (radius - edge) ** 2)) : 0;
+      g.fillColor = new Color(...bottom.map((value, channel) => Math.round(value + (top[channel] - value) * t)) as [number, number, number]);
+      g.rect(x + inset, y + i * band, width - inset * 2, band + 0.2);
+      g.fill();
+    }
+  }
+
+  private drawLeaderboardPanel(): void {
+    const layout = this.panelLayout('leaderboard');
+    const g = this.leaderboardGraphics;
+    const w = layout.panelWidth;
+    const h = layout.panelHeight;
+    g.clear();
+    for (const [inset, alpha] of [[14, 12], [7, 22], [0, 36]]) {
+      g.fillColor = new Color(8, 42, 43, alpha);
+      g.roundRect(-w / 2 - inset, -h / 2 - inset - 8, w + inset * 2, h + inset * 2, 44 + inset);
+      g.fill();
+    }
+    this.drawLeaderboardGradient(g, -w / 2, -h / 2, w, h, 44, [35, 85, 88], [16, 49, 54]);
+    g.strokeColor = new Color(111, 201, 191, 120);
+    g.lineWidth = 2;
+    g.roundRect(-w / 2, -h / 2, w, h, 44);
+    g.stroke();
+    g.strokeColor = new Color(174, 234, 220, 30);
+    g.roundRect(-w / 2 + 5, -h / 2 + 5, w - 10, h - 10, 40);
+    g.stroke();
+    g.fillColor = new Color(9, 38, 42, 96);
+    g.roundRect(-layout.contentWidth / 2 - 6, layout.listTop - layout.listHeight - 4,
+      layout.contentWidth + 12, layout.listHeight + 80, 24);
+    g.fill();
+  }
+
+  private drawLeaderboardMedal(g: Graphics, x: number, rank: number): void {
+    const colors = [[245, 201, 105], [203, 221, 230], [220, 165, 126]];
+    const c = colors[rank];
+    g.fillColor = new Color(0, 20, 25, 65);
+    g.circle(x + 2, -6, 38);
+    g.fill();
+    g.fillColor = new Color(c[0], c[1], c[2], 255);
+    // Crown silhouette sits above a double-ring metal medallion.
+    g.moveTo(x - 17, 42); g.lineTo(x - 22, 58); g.lineTo(x - 8, 52);
+    g.lineTo(x, 66); g.lineTo(x + 8, 52); g.lineTo(x + 22, 58);
+    g.lineTo(x + 17, 42); g.close(); g.fill();
+    g.circle(x, 0, 37); g.fill();
+    g.strokeColor = new Color(255, 247, 217, 210);
+    g.lineWidth = 3; g.circle(x, 0, 34); g.stroke();
+    g.strokeColor = new Color(80, 55, 30, 75);
+    g.lineWidth = 2; g.circle(x, 0, 28); g.stroke();
   }
 
   private moveLeaderboardSelection(direction: number): void {
-    for (let step = 0; step < 3; step += 1) {
-      this.leaderboardSelection = (this.leaderboardSelection + (direction > 0 ? 1 : -1) + 3) % 3;
-      if (this.leaderboardActionEnabled(this.leaderboardSelection)) break;
-    }
-    this.updateLeaderboardUI();
+    this.scrollLeaderboard(direction);
   }
 
   private activateLeaderboardSelection(): void {
-    if (this.homeOverlay !== 'leaderboard' || !this.leaderboardActionEnabled(this.leaderboardSelection)) return;
-    if (this.leaderboardSelection === 2) this.closeHomeOverlay();
-    else this.changeLeaderboardPage(this.leaderboardSelection === 0 ? -1 : 1);
+    if (this.homeOverlay === 'leaderboard') this.closeHomeOverlay();
   }
 
   private changeLeaderboardPage(direction: number): void {
-    if (!this.leaderboardActionEnabled(direction < 0 ? 0 : 1)) return;
-    this.leaderboardPage += direction;
-    if (!this.leaderboardActionEnabled(this.leaderboardSelection)) this.leaderboardSelection = 2;
-    this.updateLeaderboardUI();
+    this.scrollLeaderboard(direction);
+  }
+
+  private scrollLeaderboard(direction: number): void {
+    if (this.homeOverlay !== 'leaderboard' || this.leaderboardLoading || !this.leaderboardScroll) return;
+    const layout = this.panelLayout('leaderboard');
+    const current = this.leaderboardScroll.getScrollOffset().y;
+    const start = current;
+    this.leaderboardScrollTarget = Math.max(0, Math.min(this.leaderboardScroll.getMaxScrollOffset().y,
+      start + Math.sign(direction) * (layout.rowHeight + layout.rowGap)));
+    this.leaderboardScroll.stopAutoScroll();
+    this.leaderboardScroll.scrollToOffset(new Vec2(0, this.leaderboardScrollTarget), this.reducedMotion ? 0 : 0.16);
+    this.updateLeaderboardScrollTrack();
+  }
+
+  private updateLeaderboardScrollTrack(): void {
+    if (!this.leaderboardScrollTrack) return;
+    const layout = this.panelLayout('leaderboard');
+    const g = this.leaderboardScrollTrack;
+    g.clear();
+    const max = this.leaderboardScroll.getMaxScrollOffset().y;
+    if (max <= 0 || this.leaderboardLoading) return;
+    const x = layout.contentWidth / 2 - 5;
+    const height = Math.max(48, layout.listHeight * layout.listHeight / (max + layout.listHeight));
+    const progress = Math.max(0, Math.min(1, this.leaderboardScroll.getScrollOffset().y / max));
+    g.fillColor = new Color(130, 189, 190, 90);
+    g.roundRect(x, layout.listTop - layout.listHeight, 5, layout.listHeight, 2);
+    g.fill();
+    g.fillColor = new Color(148, 232, 207, 255);
+    g.roundRect(x, layout.listTop - height - progress * (layout.listHeight - height), 5, height, 2);
+    g.fill();
+  }
+
+  private layoutLeaderboardList(): void {
+    if (!this.leaderboardScroll) return;
+    const rank = this.panelLayout('leaderboard');
+    const previous = this.leaderboardScroll.getScrollOffset().y;
+    this.leaderboardScroll.stopAutoScroll();
+    this.leaderboardScroll.inertia = !this.reducedMotion;
+    this.leaderboardViewport.setPosition(-10, rank.listTop - rank.listHeight / 2, 0);
+    this.leaderboardViewport.getComponent(UITransform).setContentSize(rank.rowWidth, rank.listHeight);
+    const count = this.leaderboardLoading ? 0 : this.leaderboardEntries.length;
+    const height = Math.max(rank.listHeight, count * (rank.rowHeight + rank.rowGap) - rank.rowGap);
+    this.leaderboardContent.getComponent(UITransform).setContentSize(rank.rowWidth, height);
+    const offset = Math.max(0, Math.min(previous, height - rank.listHeight));
+    this.leaderboardContent.setPosition(0, rank.listHeight / 2 + offset, 0);
+    this.leaderboardScrollTarget = offset;
+    this.leaderboardRows.forEach((row, index) => {
+      row.node.getComponent(UITransform).setContentSize(rank.rowWidth, rank.rowHeight);
+      row.node.setPosition(0, rank.rowYs[index], 0);
+      const scale = rank.rowHeight / 144;
+      for (const [label, x, y, width, height, size] of [
+        [row.rank, rank.rankX, 0, rank.rankWidth, 68, 36],
+        [row.player, rank.detailX, 40, rank.split ? rank.detailWidth : rank.rowWidth - rank.rankWidth - 64, 40, rank.split ? 32 : 28],
+        [row.title, rank.detailX, 0, rank.detailWidth, 36, 26],
+        [row.detail, rank.detailX, -40, rank.rowWidth - rank.rankWidth - 64, 30, 22],
+        [row.score, rank.scoreX, rank.split ? 20 : -4, rank.scoreWidth, rank.split ? 70 : 48, rank.split ? 54 : 40],
+      ] as [Label, number, number, number, number, number][]) {
+        // Metadata may span the score column on its own bottom line.
+        const labelX = label === row.detail || (label === row.player && !rank.split)
+          ? rank.detailX - rank.detailWidth / 2 + width / 2 : x;
+        label.node.setPosition(labelX, y * scale, 0);
+        label.node.getComponent(UITransform).setContentSize(width, height * scale);
+        label.fontSize = size * scale;
+        label.lineHeight = Math.round(label.fontSize * 1.2);
+        label.enableWrapText = false;
+      }
+      row.player.isBold = true;
+    });
+    this.updateLeaderboardScrollTrack();
   }
 
   private async loadLeaderboard(): Promise<void> {
@@ -1182,6 +1500,7 @@ export class StackGame extends Component {
     this.leaderboardSubmission = this.leaderboard.submit({
       id: this.roundId, score: this.score, perfectCount: this.roundPerfectCount,
       finishedAt: Date.now(), testMode: this.roundWasTest || this.testModeEnabled,
+      nickname: this.roundNickname,
     }).catch(() => { this.leaderboardSaveFailed = true; });
   }
 
@@ -1344,6 +1663,156 @@ export class StackGame extends Component {
     ui.graphics.stroke();
   }
 
+  private buildNicknameEditor(): void {
+    this.nicknameGroup = this.makeFullNode('NicknameScreen', this.hudSafeRoot);
+    // Configure SINGLE_LINE before EditBox initializes its native DOM element.
+    this.nicknameGroup.active = false;
+    this.nicknameGroup.addComponent(BlockInputEvents);
+    this.nicknameGraphics = this.nicknameGroup.addComponent(Graphics);
+    this.makeCenteredLabel('NicknameTitle', this.nicknameGroup, '修改昵称', 54, 190, 520, 72, Color.WHITE);
+    this.makeCenteredLabel('NicknameDescription', this.nicknameGroup, '1–12 个字符 · 仅保存在本机', 24, 112, 520, 40, Color.WHITE);
+    const inputNode = this.makeNode('NicknameInput', this.nicknameGroup);
+    inputNode.addComponent(UITransform).setContentSize(500, 80);
+    this.anchorCenter(inputNode, 0, 28);
+    this.nicknameInputGraphics = inputNode.addComponent(Graphics);
+    this.nicknameEditor = inputNode.addComponent(EditBox);
+    this.nicknameEditor.inputMode = EditBox.InputMode.SINGLE_LINE;
+    this.nicknameEditor.inputFlag = EditBox.InputFlag.DEFAULT;
+    this.nicknameEditor.returnType = EditBox.KeyboardReturnType.DONE;
+    // Validate Unicode code points on save instead of truncating surrogate pairs.
+    this.nicknameEditor.maxLength = -1;
+    const text = this.nicknameEditor.textLabel
+      ?? this.makeLabel('NicknameText', inputNode, '', 34, Color.WHITE, 480, 80);
+    const placeholder = this.nicknameEditor.placeholderLabel
+      ?? this.makeLabel('NicknamePlaceholder', inputNode, '输入你的昵称', 30, Color.WHITE, 480, 80);
+    placeholder.string = '输入你的昵称';
+    for (const label of [text, placeholder]) {
+      label.node.getComponent(UITransform)?.setAnchorPoint(0, 1);
+      label.horizontalAlign = Label.HorizontalAlign.LEFT;
+      label.verticalAlign = Label.VerticalAlign.CENTER;
+      label.enableWrapText = false;
+    }
+    this.nicknameEditor.textLabel = text;
+    this.nicknameEditor.placeholderLabel = placeholder;
+    this.nicknameHint = this.makeCenteredLabel('NicknameHint', this.nicknameGroup, '', 22, -45, 520, 52, Color.WHITE);
+    this.nicknameSaveButton = this.makeOverlayButton(this.nicknameGroup, 'NicknameSave', '保存', 220, 88, -122, -142);
+    this.nicknameCancelButton = this.makeOverlayButton(this.nicknameGroup, 'NicknameCancel', '取消', 220, 88, 122, -142);
+  }
+
+  private updateNicknameEditorUI(): void {
+    if (!this.nicknameGroup) return;
+    const layout = this.panelLayout('settings');
+    const width = Math.min(640, this.visibleWidth - 56);
+    const content = width - 64;
+    const skin = this.currentSkin();
+    const text = this.textOnButton(skin.panelColor);
+    const g = this.nicknameGraphics;
+    g.clear();
+    g.fillColor = this.rgb(skin.panelColor);
+    g.roundRect(-width / 2, -250, width, 500, 36);
+    g.fill();
+    this.layoutPanelLabel(this.nicknameGroup, 'NicknameTitle', 0, 176, content, 72, 52, true);
+    this.layoutPanelLabel(this.nicknameGroup, 'NicknameDescription', 0, 104, content, 40, 24);
+    this.layoutPanelLabel(this.nicknameGroup, 'NicknameHint', 0, -48, content, 52, 22);
+    for (const name of ['NicknameTitle', 'NicknameDescription', 'NicknameHint']) this.setNamedLabelColor(this.nicknameGroup, name, text);
+    this.setCenteredNodeLayout(this.nicknameEditor.node, 0, 28);
+    this.nicknameEditor.node.getComponent(UITransform)?.setContentSize(content, 80);
+    for (const label of [this.nicknameEditor.textLabel, this.nicknameEditor.placeholderLabel]) {
+      if (label) { label.color = text; label.fontSize = 32; label.lineHeight = 40; }
+    }
+    const input = this.nicknameInputGraphics;
+    input.clear();
+    input.fillColor = new Color(text.r, text.g, text.b, 18);
+    input.roundRect(-content / 2, -40, content, 80, 16);
+    input.fill();
+    input.lineWidth = this.nicknameSelection === 0 ? 4 : 2;
+    input.strokeColor = text;
+    input.roundRect(-content / 2, -40, content, 80, 16);
+    input.stroke();
+    const buttonWidth = (content - 28) / 2;
+    for (const [button, index, x] of [
+      [this.nicknameSaveButton, 1, -(buttonWidth + 28) / 2],
+      [this.nicknameCancelButton, 2, (buttonWidth + 28) / 2],
+    ] as [ButtonUI, number, number][]) {
+      this.layoutPanelButton(button, x, -146, buttonWidth, 88, Math.min(layout.bodyFont, 36));
+      this.drawOverlayButton(button, buttonWidth, 88, this.nicknameSelection === index);
+    }
+  }
+
+  private openNicknameEditor(): void {
+    if (this.homeTransition || this.homeOverlay !== 'settings' || this.nicknameEditing) return;
+    this.settingsSelection = 3;
+    this.nicknameEditing = true;
+    this.nicknameSelection = 0;
+    this.nicknameEditor.string = this.playerNickname;
+    this.nicknameHint.string = '保存后用于新成绩，已有成绩昵称不变';
+    this.settingsGroup.active = false;
+    this.nicknameGroup.active = true;
+    this.updateNicknameEditorUI();
+    this.nicknameEditor.focus();
+  }
+
+  private onNicknameInputBegan(): void {
+    this.nicknameInputActive = true;
+    this.nicknameSelection = 0;
+    this.updateNicknameEditorUI();
+  }
+
+  private onNicknameInputEnded(): void {
+    this.nicknameInputActive = false;
+  }
+
+  private onNicknameInputReturn(): void {
+    if (!this.nicknameEditing) return;
+    // Completing text entry selects Save; it never submits a half-composed name.
+    this.nicknameEditor.blur();
+    this.nicknameInputActive = false;
+    this.nicknameSelection = 1;
+    this.updateNicknameEditorUI();
+    if (sys.isBrowser) this.focusGameCanvas();
+  }
+
+  private moveNicknameSelection(direction: number): void {
+    this.nicknameEditor.blur();
+    this.nicknameInputActive = false;
+    this.nicknameSelection = (this.nicknameSelection + (direction > 0 ? 1 : -1) + 3) % 3;
+    this.updateNicknameEditorUI();
+    if (sys.isBrowser) this.focusGameCanvas();
+  }
+
+  private activateNicknameSelection(): void {
+    if (this.nicknameSelection === 0) this.nicknameEditor.focus();
+    else if (this.nicknameSelection === 1) this.saveNicknameEditor();
+    else this.closeNicknameEditor();
+  }
+
+  private saveNicknameEditor(): void {
+    if (!this.nicknameEditing) return;
+    const value = normalizeNickname(this.nicknameEditor.string);
+    if (!value || Array.from(value).length > NICKNAME_MAX_LENGTH) {
+      this.nicknameHint.string = value ? '昵称最多 12 个字符，请缩短后保存' : '昵称不能为空';
+      this.updateNicknameEditorUI();
+      return;
+    }
+    const persistent = saveNickname(sys.localStorage, value);
+    this.playerNickname = value;
+    this.nicknameStatus = persistent ? '昵称已保存 · 仅影响新成绩' : '昵称本次生效 · 本机存储不可用';
+    this.closeNicknameEditor();
+  }
+
+  private closeNicknameEditor(): void {
+    if (!this.nicknameEditing) return;
+    this.nicknameEditor.blur();
+    this.nicknameInputActive = false;
+    this.nicknameEditing = false;
+    this.nicknameGroup.active = false;
+    this.settingsGroup.active = true;
+    this.settingsSelection = 3;
+    this.updateSettingsUI();
+    if (sys.isBrowser) this.focusGameCanvas();
+    this.lastActionAt = Date.now();
+  }
+
   private updateSettingsUI(): void {
     if (!this.settingsGraphics) {
       return;
@@ -1353,7 +1822,17 @@ export class StackGame extends Component {
     this.drawSettingToggle(this.soundToggle, COPY.sound, this.soundEnabled, this.homeOverlay === 'settings' && this.settingsSelection === 0);
     this.drawSettingToggle(this.motionToggle, COPY.reducedMotion, this.reducedMotion, this.homeOverlay === 'settings' && this.settingsSelection === 1);
     this.updateTestModeUI();
-    this.drawOverlayButton(this.settingsCloseButton, layout.buttonWidth, layout.buttonHeight, this.homeOverlay === 'settings' && this.settingsSelection === 3, true);
+    this.drawOverlayButton(this.nicknameButton, layout.buttonWidth, layout.buttonHeight, this.homeOverlay === 'settings' && this.settingsSelection === 3);
+    this.nicknameButton.label.node.setPosition(0, 20, 0);
+    this.nicknameButton.label.node.getComponent(UITransform)?.setContentSize(layout.buttonWidth - 100, 42);
+    this.nicknameButton.label.fontSize = layout.bodyFont - 6;
+    this.nicknameLabel.node.setPosition(0, -24, 0);
+    this.nicknameLabel.node.getComponent(UITransform)?.setContentSize(layout.buttonWidth - 80, 32);
+    this.nicknameLabel.string = this.playerNickname;
+    this.nicknameLabel.color = this.nicknameButton.label.color;
+    this.nicknameLabel.enableWrapText = false;
+    this.setNamedLabelText(this.settingsGroup, 'SettingsHint', this.nicknameStatus || COPY.settingsHint);
+    this.drawOverlayButton(this.settingsCloseButton, layout.buttonWidth, layout.buttonHeight, this.homeOverlay === 'settings' && this.settingsSelection === 4, true);
   }
 
   private updateSkinShopUI(): void {
@@ -1422,6 +1901,19 @@ export class StackGame extends Component {
     card.node.setScale(scale, scale, 1);
   }
 
+  private buildRecordGapHud(): void {
+    const hud = this.hudLayout();
+    this.recordGapNode = this.makeNode('RecordGap', this.gameplayHudGroup);
+    this.recordGapNode.addComponent(UITransform).setContentSize(hud.recordGapWidth, hud.recordGapHeight);
+    this.anchorTopLeft(this.recordGapNode, hud.recordGapTop, hud.edgeInset);
+    this.recordGapGraphics = this.recordGapNode.addComponent(Graphics);
+    this.recordGapLabel = this.makeLabel('RecordGapText', this.recordGapNode, '', hud.captionSize,
+      Color.WHITE, hud.recordGapWidth - 24, hud.recordGapHeight - 8);
+    this.recordGapLabel.horizontalAlign = Label.HorizontalAlign.LEFT;
+    this.recordGapLabel.enableWrapText = false;
+    this.recordGapLabel.overflow = Label.Overflow.SHRINK;
+  }
+
   private drawGameplayHudCards(): void {
     const skin = this.currentSkin();
     const panelText = this.textOnButton(skin.panelColor);
@@ -1440,6 +1932,13 @@ export class StackGame extends Component {
     drawCard(this.bestHudGraphics);
     this.scoreCaptionLabel.color = this.bestCaptionLabel.color = new Color(panelText.r, panelText.g, panelText.b, 225);
     this.scoreLabel.color = this.bestLabel.color = panelText;
+    const gap = this.recordGapGraphics;
+    gap.clear();
+    gap.fillColor = this.rgb(skin.panelColor);
+    gap.roundRect(-layout.recordGapWidth / 2, -layout.recordGapHeight / 2,
+      layout.recordGapWidth, layout.recordGapHeight, 12);
+    gap.fill();
+    this.recordGapLabel.color = panelText;
     this.drawPauseHudButton();
   }
 
@@ -1574,6 +2073,7 @@ export class StackGame extends Component {
     this.drawSettingToggle({ node: this.testModeToggle, graphics: this.testModeToggleGraphics, label: this.testModeToggleLabel },
       COPY.perfectTest, this.testModeEnabled, this.homeOverlay === 'settings' && this.settingsSelection === 2);
     this.testModeBadgeLabel.node.active = this.testModeEnabled && (this.phase === 'playing' || this.phase === 'dropping');
+    this.updateRecordGap();
   }
 
   private showReadyScreen(): void {
@@ -1638,6 +2138,7 @@ export class StackGame extends Component {
     this.updateCoinLabels();
     this.updateAudioPrompt();
     this.applyThemeToUI();
+    void this.loadHomeLeaderboardPreview();
     this.drawFrame();
   }
 
@@ -1659,6 +2160,9 @@ export class StackGame extends Component {
     this.phase = 'playing';
     this.roundId = `round-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
     this.roundWasTest = this.testModeEnabled;
+    this.roundNickname = this.playerNickname;
+    // Keep the record being chased fixed until the next round starts.
+    this.roundBestScore = this.bestScore;
     this.updateWorldComposition();
     this.phaseBeforePause = 'playing';
     this.updateTestModeUI();
@@ -1983,6 +2487,7 @@ export class StackGame extends Component {
   private setScore(value: number, animate: boolean): void {
     this.score = value;
     this.scoreLabel.string = `${this.score}`;
+    this.updateRecordGap();
     if (!animate) {
       this.scoreLabel.node.setScale(1, 1, 1);
       return;
@@ -1993,6 +2498,20 @@ export class StackGame extends Component {
     tween(this.scoreLabel.node)
       .to(this.reducedMotion ? 0.01 : 0.18, { scale: new Vec3(1, 1, 1) }, { easing: 'backOut' })
       .start();
+  }
+
+  private updateRecordGap(): void {
+    this.recordGapNode.active = !(this.roundWasTest || this.testModeEnabled);
+    if (!this.recordGapNode.active) return;
+
+    const remaining = this.roundBestScore - this.score;
+    this.recordGapLabel.string = this.roundBestScore === 0
+      ? (this.score === 0 ? '创造你的首个纪录' : `首个纪录：${this.score} 层`)
+      : remaining > 0
+        ? `距最高还差 ${remaining} 层`
+        : remaining === 0
+          ? '已追平 · 再叠 1 层破纪录'
+          : `已超过最高 ${-remaining} 层`;
   }
 
   private resetPerfectFeedback(): void {
@@ -2804,10 +3323,12 @@ export class StackGame extends Component {
     if (this.homeTransition || this.phase !== 'ready' || this.homeOverlay !== 'none') {
       return;
     }
-    this.beginScreenTransition(() => this.openHomeOverlayImmediately(overlay), 'menu-open');
+    this.beginScreenTransition(() => this.openHomeOverlayImmediately(overlay),
+      overlay === 'leaderboard' ? 'leaderboard-open' : 'menu-open');
   }
 
   private openHomeOverlayImmediately(overlay: Exclude<HomeOverlay, 'none' | 'skins'>): void {
+    this.homeLeaderboardPreviewRequest += 1;
     this.homeOverlay = overlay;
     this.lastActionAt = Date.now();
     this.startGroup.active = false;
@@ -2820,8 +3341,9 @@ export class StackGame extends Component {
       this.settingsSelection = 0;
       this.updateSettingsUI();
     } else {
-      this.leaderboardPage = 0;
-      this.leaderboardSelection = 2;
+      this.leaderboardScroll?.stopAutoScroll();
+      this.leaderboardScroll?.scrollToTop(0);
+      this.leaderboardScrollTarget = 0;
       void this.loadLeaderboard();
     }
     Tween.stopAllByTarget(group);
@@ -2832,7 +3354,8 @@ export class StackGame extends Component {
     if (this.homeTransition || this.phase !== 'ready' || this.homeOverlay === 'none') {
       return;
     }
-    this.beginScreenTransition(() => this.closeHomeOverlayImmediately(), 'menu-close');
+    this.beginScreenTransition(() => this.closeHomeOverlayImmediately(),
+      this.homeOverlay === 'leaderboard' ? 'leaderboard-close' : 'menu-close');
   }
 
   private closeHomeOverlayImmediately(): void {
@@ -2840,6 +3363,7 @@ export class StackGame extends Component {
     Tween.stopAllByTarget(this.skinsGroup);
     Tween.stopAllByTarget(this.leaderboardGroup);
     this.leaderboardRequest += 1;
+    this.leaderboardScroll?.stopAutoScroll();
     this.leaderboardGroup.active = false;
     this.leaderboardGroup.setScale(1, 1, 1);
     this.settingsGroup.active = false;
@@ -2852,6 +3376,7 @@ export class StackGame extends Component {
     this.updateHomeMenuFocus();
     this.updateSettingsUI();
     this.updateSkinShopUI();
+    void this.loadHomeLeaderboardPreview();
   }
 
   private toggleSoundSetting(): void {
@@ -2919,7 +3444,7 @@ export class StackGame extends Component {
   }
 
   private moveSettingsSelection(direction: number): void {
-    this.settingsSelection = (this.settingsSelection + (direction > 0 ? 1 : -1) + 4) % 4;
+    this.settingsSelection = (this.settingsSelection + (direction > 0 ? 1 : -1) + 5) % 5;
     this.updateSettingsUI();
   }
 
@@ -2930,6 +3455,8 @@ export class StackGame extends Component {
       this.toggleMotionSetting();
     } else if (this.settingsSelection === 2) {
       this.toggleTestMode();
+    } else if (this.settingsSelection === 3) {
+      this.openNicknameEditor();
     } else {
       this.closeHomeOverlay();
     }
@@ -3036,11 +3563,14 @@ export class StackGame extends Component {
     }
     this.world3D.setPaused(true);
     const fromDim = this.screenDimmerAlpha();
-    const toDim = kind === 'game-start' ? 0 : kind === 'menu-open' ? MENU_DIMMER_MAX_ALPHA : this.homeDimmerAlpha();
+    const toDim = kind === 'game-start' ? 0
+      : kind === 'menu-open' || kind === 'leaderboard-open' ? MENU_DIMMER_MAX_ALPHA : this.homeDimmerAlpha();
     this.homeTransition = {
+      kind,
       elapsed: 0, swapped: false, swap,
-      outSeconds: HOME_FADE_OUT_SECONDS, inSeconds: HOME_FADE_IN_SECONDS, pauseOnComplete: false,
-      direction: kind === 'menu-close' || kind === 'home-return' ? -1 : 1,
+      outSeconds: kind === 'leaderboard-close' ? 0.28 : HOME_FADE_OUT_SECONDS,
+      inSeconds: kind === 'leaderboard-open' ? 0.28 : HOME_FADE_IN_SECONDS, pauseOnComplete: false,
+      direction: kind === 'menu-close' || kind === 'leaderboard-close' || kind === 'home-return' ? -1 : 1,
       fadeWorld: kind === 'game-start' || kind === 'home-return', fromDim, toDim,
     };
     this.captureTransitionViews();
@@ -3075,7 +3605,11 @@ export class StackGame extends Component {
     for (const item of this.transitionViews) {
       if (!item.node.isValid) continue;
       item.opacity.opacity = Math.round(item.baseOpacity * visibility);
-      item.node.setPosition(item.position.x + (item.slide ? offset : 0), item.position.y, item.position.z);
+      const drawer = item.node === this.leaderboardGroup
+        && (this.homeTransition?.kind === 'leaderboard-open' || this.homeTransition?.kind === 'leaderboard-close');
+      // The full ranking grows into view from the home preview's right-hand position.
+      const distance = drawer ? projectorLeaderboardPreviewLayout(this.visibleWidth, this.visibleHeight).panelX : MENU_SLIDE_DISTANCE;
+      item.node.setPosition(item.position.x + (item.slide ? offset * distance / MENU_SLIDE_DISTANCE : 0), item.position.y, item.position.z);
     }
   }
 
@@ -3204,7 +3738,7 @@ export class StackGame extends Component {
     this.heldKeys.clear();
     if (this.homeTransition) {
       this.homeTransition.pauseOnComplete = true;
-      this.updateHomeTransition(HOME_FADE_OUT_SECONDS + HOME_FADE_IN_SECONDS);
+      this.updateHomeTransition(this.homeTransition.outSeconds + this.homeTransition.inSeconds);
       return;
     }
     this.pauseGame();
@@ -3216,6 +3750,17 @@ export class StackGame extends Component {
   }
 
   private handleKeyDownCode(keyCode: number): void {
+    if (this.nicknameEditing) {
+      if (this.heldKeys.has(keyCode)) return;
+      this.heldKeys.add(keyCode);
+      if (keyCode === KeyCode.ESCAPE || REMOTE_BACK_KEY_CODES.has(keyCode)) this.closeNicknameEditor();
+      else if (!this.nicknameInputActive) {
+        if (keyCode === KeyCode.ARROW_UP || keyCode === KeyCode.ARROW_LEFT) this.moveNicknameSelection(-1);
+        else if (keyCode === KeyCode.ARROW_DOWN || keyCode === KeyCode.ARROW_RIGHT) this.moveNicknameSelection(1);
+        else if (keyCode === KeyCode.ENTER || keyCode === KeyCode.SPACE || REMOTE_CONFIRM_KEY_CODES.has(keyCode)) this.activateNicknameSelection();
+      }
+      return;
+    }
     const isBackKey = keyCode === KeyCode.ESCAPE
       || keyCode === 8
       || REMOTE_BACK_KEY_CODES.has(keyCode);
@@ -3293,9 +3838,8 @@ export class StackGame extends Component {
     }
 
     if (this.phase === 'ready') {
-      if (keyCode === KeyCode.KEY_K) {
-        this.homeSelection = 1;
-        this.openHomeOverlay('leaderboard');
+      if (keyCode === KeyCode.KEY_K || keyCode === KeyCode.ARROW_RIGHT || keyCode === KeyCode.KEY_D) {
+        this.onLeaderboardButton();
       } else if (keyCode === KeyCode.KEY_T) {
         this.toggleTestMode();
       } else if (isMenuNavigation) {
@@ -3366,6 +3910,13 @@ export class StackGame extends Component {
     this.gamepadWestHeld = westPressed;
     this.gamepadMenuAxisHeld = menuAxisPressed;
 
+    if (this.nicknameEditing) {
+      if (eastJustPressed || optionsJustPressed) this.closeNicknameEditor();
+      else if (menuAxisJustPressed) this.moveNicknameSelection(Math.abs(menuAxisY) >= Math.abs(menuAxisX)
+        ? (menuAxisY < 0 ? 1 : -1) : (menuAxisX > 0 ? 1 : -1));
+      else if (southJustPressed) this.activateNicknameSelection();
+      return;
+    }
     if (this.homeTransition) return;
     if (this.phase === 'gameover') {
       if (eastJustPressed) this.returnToHome();
@@ -3419,7 +3970,9 @@ export class StackGame extends Component {
     }
 
     if (this.phase === 'ready') {
-      if (menuAxisJustPressed) {
+      if (menuAxisJustPressed && menuAxisX > 0.55 && Math.abs(menuAxisX) > Math.abs(menuAxisY)) {
+        this.onLeaderboardButton();
+      } else if (menuAxisJustPressed) {
         const forward = Math.abs(menuAxisY) >= Math.abs(menuAxisX)
           ? menuAxisY < 0
           : menuAxisX > 0;
@@ -3491,7 +4044,7 @@ export class StackGame extends Component {
   }
 
   private onCanvasResize(): void {
-    if (this.homeTransition) this.updateHomeTransition(HOME_FADE_OUT_SECONDS + HOME_FADE_IN_SECONDS);
+    if (this.homeTransition) this.updateHomeTransition(this.homeTransition.outSeconds + this.homeTransition.inSeconds);
     this.resizeStage();
   }
 
@@ -3500,6 +4053,9 @@ export class StackGame extends Component {
     const frame = screen.windowSize;
     this.visibleWidth = visible.width;
     this.visibleHeight = visible.height;
+    // Keep Canvas and its child UI camera at the visible center, including on
+    // fixed-height wide screens, so native EditBox text aligns with canvas UI.
+    this.node.setPosition(visible.width / 2, visible.height / 2, this.node.position.z);
     const frameAspect = frame.width / Math.max(1, frame.height);
     this.wideLayout = frameAspect >= WIDE_LAYOUT_MIN_ASPECT
       && frame.width >= WIDE_LAYOUT_MIN_FRAME_WIDTH;
@@ -3559,6 +4115,7 @@ export class StackGame extends Component {
   }
 
   private loadSettings(): void {
+    this.playerNickname = loadNickname(sys.localStorage);
     try {
       const storedBest = Number.parseInt(sys.localStorage.getItem(BEST_SCORE_STORAGE_KEY) || '0', 10);
       const storedCoins = Number.parseInt(
@@ -3932,6 +4489,7 @@ export class StackGame extends Component {
     this.updateSkinShopUI();
     this.updateResultFocus();
     this.updateLeaderboardUI();
+    this.updateHomeLeaderboardPreviewUI();
   }
 
   private setNamedLabelColor(parent: Node, childName: string, color: Color): void {
@@ -3939,6 +4497,11 @@ export class StackGame extends Component {
     if (label) {
       label.color = color;
     }
+  }
+
+  private setNamedLabelText(parent: Node, childName: string, text: string): void {
+    const label = parent.getChildByName(childName)?.getComponent(Label);
+    if (label) label.string = text;
   }
 
   private rgb(value: RGB, alpha = 255): Color {
@@ -4172,9 +4735,10 @@ export class StackGame extends Component {
       label.isBold = true;
       label.enableWrapText = false;
     }
-    this.controlsLabel.string = layout.split ? '↑ ↓ 选择　·　确认键进入' : '轻点按钮，即刻开叠';
+    this.controlsLabel.string = layout.split ? '↑ ↓ 选择 · → 排行 · 确认进入' : '轻点按钮，即刻开叠';
     place(this.controlsLabel, x, layout.footerY, width, 48, layout.split ? 30 : 24);
     this.precisionTipLabel.node.active = false;
+    this.updateHomeLeaderboardPreviewUI();
   }
 
   private panelLayout(kind: 'settings' | 'leaderboard' | 'pause' | 'result') {
@@ -4249,17 +4813,22 @@ export class StackGame extends Component {
     this.pauseButtonLabel.fontSize = hud.captionSize + 4;
     this.pauseButtonLabel.lineHeight = Math.round(this.pauseButtonLabel.fontSize * 1.2);
     this.pauseButtonLabel.isBold = true;
-    this.setTopLeftLayout(this.testModeBadgeLabel.node, hud.top + hud.cardHeight + 20, hud.edgeInset);
+    this.recordGapNode.getComponent(UITransform)?.setContentSize(hud.recordGapWidth, hud.recordGapHeight);
+    this.setTopLeftLayout(this.recordGapNode, hud.recordGapTop, hud.edgeInset);
+    this.recordGapLabel.node.getComponent(UITransform)?.setContentSize(hud.recordGapWidth - 24, hud.recordGapHeight - 8);
+    this.recordGapLabel.fontSize = hud.captionSize;
+    this.recordGapLabel.lineHeight = Math.round(hud.captionSize * 1.2);
+    this.setTopLeftLayout(this.testModeBadgeLabel.node, hud.recordGapTop, hud.edgeInset);
 
     for (const [kind, group, title, hint, buttons] of [
       ['settings', this.settingsGroup, 'SettingsTitle', 'SettingsHint', [this.soundToggle, this.motionToggle,
-        { node: this.testModeToggle, graphics: this.testModeToggleGraphics, label: this.testModeToggleLabel }, this.settingsCloseButton]],
+        { node: this.testModeToggle, graphics: this.testModeToggleGraphics, label: this.testModeToggleLabel }, this.nicknameButton, this.settingsCloseButton]],
       ['pause', this.pauseGroup, 'PauseTitle', 'PauseHint', [
         { node: this.resumeButton, graphics: this.resumeButtonGraphics, label: this.resumeButtonLabel },
         { node: this.restartButton, graphics: this.restartButtonGraphics, label: this.restartButtonLabel },
         { node: this.homeButton, graphics: this.homeButtonGraphics, label: this.homeButtonLabel }]],
       ['result', this.resultGroup, 'ResultTitle', '', [this.resultRestartButton, this.resultHomeButton]],
-      ['leaderboard', this.leaderboardGroup, 'LeaderboardTitle', 'LeaderboardStatus', this.leaderboardButtons],
+      ['leaderboard', this.leaderboardGroup, 'LeaderboardTitle', 'LeaderboardStatus', []],
     ] as ['settings' | 'pause' | 'result' | 'leaderboard', Node, string, string, ButtonUI[]][]) {
       const layout = this.panelLayout(kind);
       this.layoutPanelLabel(group, title, layout.panelX, layout.titleY, layout.contentWidth, layout.titleSize * 1.3, layout.titleSize, true);
@@ -4281,29 +4850,27 @@ export class StackGame extends Component {
     this.layoutPanelLabel(this.resultGroup, 'Restart', result.panelX, result.footerY, result.contentWidth, 44, result.captionFont);
 
     const rank = this.panelLayout('leaderboard');
-    this.layoutPanelLabel(this.leaderboardGroup, 'LeaderboardRankHeading', rank.panelX + rank.rankX, rank.headerY, rank.rankWidth, 40, rank.captionFont);
-    this.layoutPanelLabel(this.leaderboardGroup, 'LeaderboardColumns', rank.panelX + rank.detailX, rank.headerY, rank.detailWidth, 40, rank.captionFont);
+    const titleWidth = rank.contentWidth - 100;
+    this.layoutPanelLabel(this.leaderboardGroup, 'LeaderboardTitle', -50, rank.titleY, titleWidth, rank.titleSize * 1.3, rank.titleSize, true);
+    const title = this.leaderboardGroup.getChildByName('LeaderboardTitle')?.getComponent(Label);
+    if (title) title.horizontalAlign = Label.HorizontalAlign.LEFT;
+    const status = this.leaderboardGroup.getChildByName('LeaderboardStatus')?.getComponent(Label);
+    if (status) status.horizontalAlign = Label.HorizontalAlign.LEFT;
+    this.layoutPanelLabel(this.leaderboardGroup, 'LeaderboardStatus', 45, rank.subtitleY,
+      rank.contentWidth - 90, 52, rank.captionFont + 4);
+    this.leaderboardButtons.forEach(button => {
+      this.layoutPanelButton(button, rank.contentWidth / 2 - 38, rank.titleY, 76, 76, 48);
+      button.label.node.getComponent(UITransform).setContentSize(60, 64);
+    });
+    this.layoutPanelLabel(this.leaderboardGroup, 'LeaderboardRankHeading', rank.rankX - 10, rank.headerY, rank.rankWidth, 40, rank.captionFont);
+    this.layoutPanelLabel(this.leaderboardGroup, 'LeaderboardColumns', rank.detailX - 10, rank.headerY, rank.detailWidth, 40, rank.captionFont);
+    this.layoutPanelLabel(this.leaderboardGroup, 'LeaderboardScoreHeading', rank.scoreX - 10, rank.headerY, rank.scoreWidth, 40, rank.captionFont);
     this.layoutPanelLabel(this.leaderboardGroup, 'LeaderboardEmpty', rank.panelX, 40, rank.contentWidth, 180, rank.bodyFont - 4);
     // Error/loading messages may need two lines, unlike the compact table labels.
     this.leaderboardEmpty.enableWrapText = true;
-    this.layoutPanelLabel(this.leaderboardGroup, 'LeaderboardPage', rank.panelX, rank.pageY, rank.contentWidth, 38, rank.captionFont);
-    this.leaderboardRows.forEach((row, index) => {
-      row.node.getComponent(UITransform)?.setContentSize(rank.rowWidth, rank.rowHeight);
-      this.setCenteredNodeLayout(row.node, rank.panelX, rank.rowYs[index]);
-      row.rank.node.setPosition(rank.rankX, 0, 0);
-      row.rank.node.getComponent(UITransform)?.setContentSize(rank.rankWidth, rank.rowHeight - 12);
-      row.rank.fontSize = rank.bodyFont;
-      row.rank.lineHeight = Math.round(rank.bodyFont * 1.2);
-      for (const [label, y, fontSize, height] of [
-        [row.score, 21, rank.bodyFont - 4, 44], [row.detail, -24, rank.captionFont, 34],
-      ] as [Label, number, number, number][]) {
-        label.node.setPosition(rank.detailX, y, 0);
-        label.node.getComponent(UITransform)?.setContentSize(rank.detailWidth, height);
-        label.fontSize = fontSize;
-        label.lineHeight = Math.round(fontSize * 1.2);
-        label.enableWrapText = false;
-      }
-    });
+    this.layoutPanelLabel(this.leaderboardGroup, 'LeaderboardScrollHint', rank.panelX, rank.footerY, rank.contentWidth, 44, rank.captionFont);
+    this.layoutLeaderboardList();
+    this.updateNicknameEditorUI();
   }
 
   private applyResponsiveLayout(): void {

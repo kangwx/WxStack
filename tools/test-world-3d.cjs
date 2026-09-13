@@ -447,16 +447,21 @@ const webTemplate = fs.readFileSync(path.join(__dirname, '../build-templates/web
 const gameCompiled = ts.transpileModule(gameSource, { compilerOptions: {
   target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.CommonJS, experimentalDecorators: true,
 } }).outputText;
-function loadLayoutModule() {
+function loadPlainModule(name) {
   const runtime = { exports: {} };
-  const layoutSource = fs.readFileSync(path.join(__dirname, '../assets/scripts/ProjectorLayout.ts'), 'utf8');
-  vm.runInNewContext(ts.transpileModule(layoutSource, { compilerOptions: {
+  const moduleSource = fs.readFileSync(path.join(__dirname, `../assets/scripts/${name}.ts`), 'utf8');
+  vm.runInNewContext(ts.transpileModule(moduleSource, { compilerOptions: {
     target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.CommonJS,
   } }).outputText, runtime);
   return runtime.exports;
 }
+const loadLayoutModule = () => loadPlainModule('ProjectorLayout');
+const leaderboardData = loadPlainModule('Leaderboard');
 const gameSandbox = { exports: {}, require: id => id === 'cc' ? cc
-  : id === './ProjectorLayout' ? loadLayoutModule() : { StackWorld3D } };
+  : id === './ProjectorLayout' ? loadLayoutModule()
+  : id === './Leaderboard' ? leaderboardData
+  : id === './RemoteInput' ? loadPlainModule('RemoteInput') : { StackWorld3D },
+  navigator: { userAgent: 'test-browser' } };
 vm.runInNewContext(gameCompiled, gameSandbox);
 const GamePrototype = gameSandbox.exports.StackGame.prototype;
 
@@ -506,6 +511,212 @@ test('home menu exposes default focus and remote direction, confirm, and back ac
   assert.equal(started, 1);
   game.handleKeyDownCode(66);
   assert.equal(started, 1);
+});
+
+function leaderboardInputGame() {
+  const game = Object.create(GamePrototype);
+  const opened = [];
+  const pages = [];
+  Object.assign(game, {
+    phase: 'ready', homeTransition: null, homeOverlay: 'none', homeSelection: 0,
+    heldKeys: new Set(), updateHomeMenuFocus() {}, drawFrame() {},
+    openHomeOverlay(overlay) { opened.push(overlay); this.homeOverlay = overlay; },
+    closeHomeOverlay() { this.homeOverlay = 'none'; },
+    changeLeaderboardPage(direction) { pages.push(direction); },
+  });
+  return { game, opened, pages };
+}
+
+function gamepadEvent(x = 0, y = 0, useStick = false) {
+  const zeroButton = { getValue: () => 0 };
+  return { gamepad: {
+    buttonSouth: zeroButton, buttonOptions: zeroButton, buttonNorth: zeroButton,
+    buttonEast: zeroButton, buttonWest: zeroButton,
+    dpad: { getValue: () => ({ x: useStick ? 0 : x, y: useStick ? 0 : y }) },
+    leftStick: { getValue: () => ({ x: useStick ? x : 0, y: useStick ? y : 0 }) },
+  } };
+}
+
+test('home Right, D and K open the leaderboard directly from any selection without a second confirm', () => {
+  for (const key of [cc.KeyCode.ARROW_RIGHT, cc.KeyCode.KEY_D, cc.KeyCode.KEY_K]) {
+    for (const selection of [0, 1, 2]) {
+      const { game, opened, pages } = leaderboardInputGame();
+      game.homeSelection = selection;
+      game.handleKeyDownCode(key);
+      assert.deepEqual(opened, ['leaderboard']);
+      assert.equal(game.homeSelection, 1, 'return focus belongs to the leaderboard button');
+      game.handleKeyDownCode(key);
+      assert.deepEqual(pages, [], 'holding the opening key must not immediately turn a page');
+      game.heldKeys.delete(key);
+      game.handleKeyDownCode(cc.KeyCode.ESCAPE);
+      assert.equal(game.homeOverlay, 'none');
+      assert.equal(game.homeSelection, 1);
+    }
+  }
+});
+
+test('home vertical and left navigation retain their three-item wrap order', () => {
+  const { game, opened } = leaderboardInputGame();
+  for (const key of [cc.KeyCode.ARROW_DOWN, cc.KeyCode.KEY_S, cc.KeyCode.ARROW_DOWN]) {
+    game.heldKeys.delete(key);
+    game.handleKeyDownCode(key);
+  }
+  assert.equal(game.homeSelection, 0);
+  for (const key of [cc.KeyCode.ARROW_UP, cc.KeyCode.KEY_W, cc.KeyCode.ARROW_LEFT, cc.KeyCode.KEY_A]) {
+    const previous = game.homeSelection;
+    game.handleKeyDownCode(key);
+    assert.equal(game.homeSelection, (previous + 2) % 3);
+  }
+  assert.deepEqual(opened, []);
+});
+
+test('right gamepad d-pad and stick open the leaderboard once, while a fresh horizontal input pages it', () => {
+  for (const useStick of [false, true]) {
+    const { game, opened, pages } = leaderboardInputGame();
+    game.homeSelection = 2;
+    game.onGamepadInput(gamepadEvent(1, 0, useStick));
+    assert.deepEqual(opened, ['leaderboard']);
+    assert.equal(game.homeSelection, 1);
+    game.onGamepadInput(gamepadEvent(1, 0, useStick));
+    assert.deepEqual(pages, [], 'a held axis does not leak into paging');
+    game.onGamepadInput(gamepadEvent());
+    game.onGamepadInput(gamepadEvent(1, 0, useStick));
+    game.onGamepadInput(gamepadEvent());
+    game.onGamepadInput(gamepadEvent(-1, 0, useStick));
+    assert.deepEqual(pages, [1, -1]);
+  }
+});
+
+test('leaderboard left/right keys remain page actions instead of reopening the home panel', () => {
+  const { game, opened, pages } = leaderboardInputGame();
+  game.homeOverlay = 'leaderboard';
+  for (const key of [cc.KeyCode.ARROW_RIGHT, cc.KeyCode.KEY_D, cc.KeyCode.ARROW_LEFT, cc.KeyCode.KEY_A]) {
+    game.handleKeyDownCode(key);
+  }
+  assert.deepEqual(pages, [1, 1, -1, -1]);
+  assert.deepEqual(opened, []);
+});
+
+test('nickname typing lets Chinese, English, editing keys and IME composition reach the native input', () => {
+  const game = new gameSandbox.exports.StackGame();
+  const routed = [];
+  Object.assign(game, {
+    nicknameEditing: true, nicknameInputActive: true, nicknameSelection: 0,
+    nicknameEditor: { isFocused: () => true },
+    handleKeyDownCode(key) { routed.push(key); },
+  });
+  const events = [
+    ...['w', 'a', 's', 'd', 'p', 'r', 't', 'k', ' ', 'Backspace', 'ArrowLeft', 'ArrowRight', 'Enter', '你']
+      .map(key => ({ key })),
+    { key: 'Process', keyCode: 229, isComposing: true },
+    { key: 'Enter', keyCode: 13, isComposing: true },
+    { key: 'Escape', keyCode: 27, isComposing: true },
+  ];
+  for (const values of events) {
+    const event = { ...values, target: { tagName: 'INPUT' },
+      preventDefault() { assert.fail(`${values.key} must reach the nickname input`); },
+      stopImmediatePropagation() {
+        assert.ok(values.isComposing, `${values.key} must not be swallowed by game shortcuts`);
+      },
+    };
+    game.onBrowserRemoteKeyDown(event);
+    game.onBrowserRemoteKeyUp(event);
+  }
+  assert.deepEqual(routed, []);
+});
+
+function nicknameInputGame() {
+  const game = new gameSandbox.exports.StackGame();
+  const actions = [];
+  Object.assign(game, {
+    phase: 'ready', homeOverlay: 'settings', nicknameEditing: true,
+    nicknameInputActive: true, nicknameSelection: 0,
+    nicknameEditor: {
+      blur() { game.nicknameInputActive = false; },
+      focus() { game.nicknameInputActive = true; },
+    },
+    updateNicknameEditorUI() {},
+    saveNicknameEditor() { actions.push('save'); },
+    closeNicknameEditor() { actions.push('cancel'); this.nicknameEditing = false; },
+    moveSettingsSelection() { assert.fail('modal navigation must not change underlying settings focus'); },
+  });
+  return { game, actions };
+}
+
+test('nickname Tab and Escape remain modal controls while ordinary input keys are not routed to the game', () => {
+  const { game, actions } = nicknameInputGame();
+  let prevented = 0;
+  let stopped = 0;
+  const key = (value, shiftKey = false) => game.onBrowserRemoteKeyDown({ key: value, shiftKey,
+    preventDefault() { prevented += 1; }, stopImmediatePropagation() { stopped += 1; } });
+  key('Tab');
+  assert.equal(game.nicknameSelection, 1);
+  assert.equal(game.nicknameInputActive, false);
+  key('Tab', true);
+  assert.equal(game.nicknameSelection, 0);
+  key('Escape');
+  assert.deepEqual(actions, ['cancel']);
+  assert.equal(prevented, 3);
+  assert.equal(stopped, 3);
+});
+
+test('Android nickname bridge confirms text before saving, supports focus directions and ignores native repeats', () => {
+  const { game, actions } = nicknameInputGame();
+  assert.equal(game.onAndroidRemoteKey(23, 0, 0), true);
+  assert.equal(game.nicknameSelection, 1, 'native confirm ends text entry and selects Save');
+  assert.equal(game.nicknameInputActive, false);
+  assert.deepEqual(actions, [], 'confirming text must not save on the same press');
+  game.onAndroidRemoteKey(23, 0, 1);
+  assert.deepEqual(actions, [], 'held confirm does not immediately activate Save');
+  game.heldKeys.add(cc.KeyCode.ENTER);
+  game.onAndroidRemoteKey(23, 1, 0);
+  assert.equal(game.heldKeys.has(cc.KeyCode.ENTER), false);
+  game.onAndroidRemoteKey(23, 0, 0);
+  assert.deepEqual(actions, ['save']);
+
+  for (const [native, expected] of [[19, 2], [20, 1], [21, 2], [22, 1]]) {
+    game.nicknameInputActive = true;
+    game.nicknameSelection = 0;
+    game.onAndroidRemoteKey(native, 0, 0);
+    assert.equal(game.nicknameSelection, expected);
+    assert.equal(game.nicknameInputActive, false);
+    game.onAndroidRemoteKey(native, 0, 1);
+    assert.equal(game.nicknameSelection, expected);
+    game.onAndroidRemoteKey(native, 1, 0);
+  }
+  assert.equal(game.onAndroidRemoteKey(24, 0), false, 'volume stays with the host');
+  assert.equal(game.onAndroidRemoteKey(23, 3), false, 'unknown native actions are rejected');
+  game.onAndroidRemoteKey(4, 0, 0);
+  assert.deepEqual(actions, ['save', 'cancel']);
+});
+
+test('nickname gamepad focus reaches input, Save and Cancel and a held direction does not skip an option', () => {
+  const { game, actions } = nicknameInputGame();
+  const confirm = () => {
+    const event = gamepadEvent();
+    event.gamepad.buttonSouth = { getValue: () => 1 };
+    game.onGamepadInput(event);
+  };
+  game.onGamepadInput(gamepadEvent(1, 0));
+  assert.equal(game.nicknameSelection, 1);
+  assert.equal(game.nicknameInputActive, false);
+  game.onGamepadInput(gamepadEvent(1, 0));
+  assert.equal(game.nicknameSelection, 1);
+  game.onGamepadInput(gamepadEvent());
+  confirm();
+  assert.deepEqual(actions, ['save']);
+  game.onGamepadInput(gamepadEvent());
+  game.onGamepadInput(gamepadEvent(-1, 0));
+  assert.equal(game.nicknameSelection, 0);
+  game.onGamepadInput(gamepadEvent());
+  confirm();
+  assert.equal(game.nicknameInputActive, true);
+  game.onGamepadInput(gamepadEvent());
+  game.onGamepadInput(gamepadEvent(-1, 0));
+  assert.equal(game.nicknameSelection, 2);
+  game.onGamepadInput(gamepadEvent());
+  confirm();
+  assert.deepEqual(actions, ['save', 'cancel']);
 });
 
 test('skin menu uses one continuous vertical focus order including return home', () => {
@@ -669,6 +880,7 @@ function homeTransitionGame(phase = 'gameover', reducedMotion = false) {
   const opacities = [];
   Object.assign(game, {
     phase, reducedMotion, restartLock: 0, homeTransition: null, coins: 64, homeOverlay: 'none',
+    visibleWidth: 1920 / 1080 * 1334, visibleHeight: 1334,
     transitionViews: [], heldKeys: new Set(),
     world3D: { setPaused(value) { pauses.push(value); }, setPresentationOpacity(value) { opacities.push(value); } },
     transitionBlocker: { active: false }, effectsGraphics: { clear() {}, node: { active: true } },
@@ -758,31 +970,148 @@ test('starting a round waits for the tower fade and resumes physics only after r
   assert.equal(game.homeTransition, null);
 });
 
-test('menu opening and closing use one guarded transition and reduced motion skips it', () => {
+test('settings opening and closing retain their short guarded transitions and reduced motion skips them', () => {
   const { game, opacities } = homeTransitionGame('ready');
   Object.assign(game, { homeOverlay:'none',
     openHomeOverlayImmediately(overlay) { this.setScreen('ready', overlay); },
     closeHomeOverlayImmediately() { this.setScreen('ready'); } });
-  game.openHomeOverlay('leaderboard');
   game.openHomeOverlay('settings');
+  game.openHomeOverlay('leaderboard');
   assert.equal(game.homeOverlay, 'none');
   game.updateHomeTransition(0.05);
   assert.ok(game.startGroup.position.x < 0);
   assert.ok(game.dimAlpha >= 18 && game.dimAlpha <= 51);
   game.updateHomeTransition(0.05);
-  assert.equal(game.leaderboardGroup.position.x, 24);
+  assert.equal(game.settingsGroup.position.x, 24);
   assert.equal(opacities.length, 0, 'menu changes must not fade/reset the tower');
   game.updateHomeTransition(0.16);
-  assert.equal(game.homeOverlay, 'leaderboard');
+  assert.equal(game.homeOverlay, 'settings');
   assert.equal(game.homeTransition, null);
   game.closeHomeOverlay();
-  assert.equal(game.homeOverlay, 'leaderboard');
+  assert.equal(game.homeOverlay, 'settings');
   game.updateHomeTransition(0.32);
   assert.equal(game.homeOverlay, 'none');
   game.reducedMotion=true;
   game.openHomeOverlay('settings');
   assert.equal(game.homeOverlay, 'settings');
   assert.equal(game.homeTransition, null);
+});
+
+test('leaderboard expands from the right preview into the center and exits to the right without moving the tower', () => {
+  const { game, opacities } = homeTransitionGame('ready');
+  Object.assign(game, {
+    openHomeOverlayImmediately(overlay) { this.setScreen('ready', overlay); },
+    closeHomeOverlayImmediately() { this.setScreen('ready'); },
+  });
+  const preview = loadLayoutModule().projectorLeaderboardPreviewLayout(game.visibleWidth, game.visibleHeight);
+  game.openHomeOverlay('leaderboard');
+  const opening = game.homeTransition;
+  assert.equal(opening.kind, 'leaderboard-open');
+  game.openHomeOverlay('settings');
+  game.closeHomeOverlay();
+  assert.equal(game.homeTransition, opening, 'repeated navigation cannot replace the drawer transition');
+  game.updateHomeTransition(opening.outSeconds);
+  assert.equal(game.homeOverlay, 'leaderboard');
+  assert.equal(game.leaderboardGroup.position.x, preview.panelX);
+  assert.ok(game.leaderboardGroup.position.x > 24, 'leaderboard moves farther than the regular menu entrance');
+  assert.equal(game.leaderboardGroup.getComponent(UIOpacity).opacity, 0);
+  game.updateHomeTransition(opening.inSeconds / 2);
+  assert.ok(game.leaderboardGroup.position.x > 0 && game.leaderboardGroup.position.x < preview.panelX);
+  assert.equal(opacities.length, 0, 'drawer movement does not fade the tower');
+  game.updateHomeTransition(opening.inSeconds);
+  assert.equal(game.homeTransition, null);
+  assert.equal(game.leaderboardGroup.position.x, 0, 'open ranking finishes centered');
+  assert.equal(game.leaderboardGroup.getComponent(UIOpacity).opacity, 255);
+  assert.equal(game.leaderboardGroup.getComponent(Widget).enabled, true);
+
+  game.closeHomeOverlay();
+  const closing = game.homeTransition;
+  assert.equal(closing.kind, 'leaderboard-close');
+  game.updateHomeTransition(closing.outSeconds / 2);
+  assert.ok(game.leaderboardGroup.position.x > 0, 'closing moves the ranking back to the right');
+  game.updateHomeTransition(closing.outSeconds / 2);
+  assert.equal(game.homeOverlay, 'none');
+  assert.equal(game.leaderboardGroup.position.x, 0, 'hidden ranking position is restored for the next visit');
+  assert.equal(game.startGroup.position.x, -24, 'home still uses its existing short entrance');
+  game.updateHomeTransition(closing.inSeconds + 0.001);
+  assert.equal(game.homeTransition, null);
+  assert.equal(game.startGroup.position.x, 0);
+  assert.equal(game.transitionBlocker.active, false);
+});
+
+test('leaderboard resize settles both longer drawer transitions before applying the new layout', () => {
+  for (const [width, height] of [[320, 568], [1920, 1080], [2560, 1080]]) {
+    for (const closing of [false, true]) {
+      const { game } = homeTransitionGame('ready');
+      game.visibleWidth = width / height * game.visibleHeight;
+      Object.assign(game, {
+        openHomeOverlayImmediately(overlay) { this.setScreen('ready', overlay); },
+        closeHomeOverlayImmediately() { this.setScreen('ready'); },
+      });
+      if (closing) {
+        game.setScreen('ready', 'leaderboard');
+        game.closeHomeOverlay();
+      } else {
+        game.openHomeOverlay('leaderboard');
+      }
+      game.updateHomeTransition(0.05);
+      let resized = false;
+      game.resizeStage = () => {
+        resized = true;
+        assert.equal(game.homeTransition, null);
+        assert.equal(game.homeOverlay, closing ? 'none' : 'leaderboard');
+        const revealed = closing ? game.startGroup : game.leaderboardGroup;
+        assert.equal(revealed.position.x, 0);
+        assert.equal(revealed.getComponent(UIOpacity).opacity, 255);
+        assert.equal(revealed.getComponent(Widget).enabled, true);
+      };
+      game.onCanvasResize();
+      assert.equal(resized, true);
+      assert.equal(game.transitionBlocker.active, false);
+    }
+  }
+});
+
+test('reduced motion opens and closes the centered ranking immediately without a slide or input blocker', () => {
+  const { game } = homeTransitionGame('ready', true);
+  Object.assign(game, {
+    openHomeOverlayImmediately(overlay) { this.setScreen('ready', overlay); },
+    closeHomeOverlayImmediately() { this.setScreen('ready'); },
+  });
+  game.onLeaderboardButton();
+  assert.equal(game.homeOverlay, 'leaderboard');
+  assert.equal(game.homeSelection, 1);
+  assert.equal(game.homeTransition, null);
+  assert.equal(game.leaderboardGroup.position.x, 0);
+  assert.equal(game.transitionBlocker.active, false);
+  game.closeHomeOverlay();
+  assert.equal(game.homeOverlay, 'none');
+  assert.equal(game.homeSelection, 1);
+  assert.equal(game.homeTransition, null);
+});
+
+test('closing the real leaderboard restores button focus, invalidates pending loads and refreshes the home preview', () => {
+  const { game } = homeTransitionGame('ready', true);
+  let fullLoads = 0;
+  let previewLoads = 0;
+  let focused;
+  Object.assign(game, {
+    skinsGroup: new Node('Skins'), leaderboardRequest: 3, homeLeaderboardPreviewRequest: 4,
+    loadLeaderboard() { fullLoads += 1; }, loadHomeLeaderboardPreview() { previewLoads += 1; },
+    updateHomeMenuFocus() { focused = this.homeSelection; }, updateSettingsUI() {}, updateSkinShopUI() {},
+  });
+  game.onLeaderboardButton();
+  assert.equal(game.homeOverlay, 'leaderboard');
+  assert.equal(fullLoads, 1);
+  assert.equal(game.homeLeaderboardPreviewRequest, 5);
+  assert.equal(game.leaderboardScrollTarget, 0, 'the full panel starts at the top of its list');
+  game.closeHomeOverlay();
+  assert.equal(game.homeOverlay, 'none');
+  assert.equal(focused, 1);
+  assert.equal(game.leaderboardRequest, 4);
+  assert.equal(previewLoads, 1);
+  assert.equal(game.startGroup.active, true);
+  assert.equal(game.leaderboardGroup.active, false);
 });
 
 test('backgrounding during start leaves the revealed round paused', () => {

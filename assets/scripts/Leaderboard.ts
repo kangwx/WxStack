@@ -1,5 +1,8 @@
 export const LEADERBOARD_STORAGE_KEY = 'wxstack-leaderboard-v1';
 export const LEADERBOARD_LIMIT = 10;
+export const NICKNAME_STORAGE_KEY = 'wxstack-nickname';
+export const DEFAULT_NICKNAME = '叠叠玩家';
+export const NICKNAME_MAX_LENGTH = 12;
 
 export interface LeaderboardEntry {
   id: string;
@@ -7,6 +10,7 @@ export interface LeaderboardEntry {
   perfectCount: number | null;
   finishedAt: number | null;
   kind: 'round' | 'legacy';
+  nickname?: string;
 }
 
 export interface RoundResult {
@@ -15,6 +19,7 @@ export interface RoundResult {
   perfectCount: number;
   finishedAt: number;
   testMode: boolean;
+  nickname?: string;
 }
 
 export interface LeaderboardSnapshot {
@@ -37,6 +42,60 @@ function validInteger(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
 }
 
+export function leaderboardTitle(score: number): string {
+  const layers = validInteger(score) ? score : 0;
+  if (layers >= 500) {
+    const stars = Math.floor((layers - 500) / 100);
+    return stars > 0 ? `王者 +${stars} 星` : '最强王者';
+  }
+  if (layers >= 350) return '钻石';
+  if (layers >= 200) return '铂金';
+  if (layers >= 100) return '黄金';
+  if (layers >= 50) return '白银';
+  return '青铜';
+}
+
+/** Keep visible text intact; validation rejects long names instead of truncating.
+ * Whitespace controls become spaces, while invisible formatting is removed.
+ */
+export function normalizeNickname(value: unknown): string {
+  if (typeof value !== 'string') return '';
+  return value.normalize('NFC')
+    .replace(/[\u0000-\u0008\u000E-\u001F\u007F-\u009F\u00AD\u034F\u061C\u180E\u200B-\u200F\u202A-\u202E\u2060-\u206F\uFEFF]/g, '')
+    .replace(/\s+/g, ' ').trim().normalize('NFC');
+}
+
+function validNickname(value: string): boolean {
+  const length = Array.from(value).length;
+  return length > 0 && length <= NICKNAME_MAX_LENGTH;
+}
+
+export function loadNickname(storage: LeaderboardStorage | null): string {
+  try {
+    const nickname = normalizeNickname(storage?.getItem(NICKNAME_STORAGE_KEY));
+    return validNickname(nickname) ? nickname : DEFAULT_NICKNAME;
+  } catch {
+    return DEFAULT_NICKNAME;
+  }
+}
+
+export function saveNickname(storage: LeaderboardStorage | null, nickname: string): boolean {
+  const normalized = normalizeNickname(nickname);
+  if (!storage || !validNickname(normalized)) return false;
+  try {
+    storage.setItem(NICKNAME_STORAGE_KEY, normalized);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function withNormalizedNickname(entry: LeaderboardEntry): LeaderboardEntry {
+  const { nickname: value, ...record } = entry;
+  const nickname = normalizeNickname(value);
+  return validNickname(nickname) ? { ...record, nickname } : record;
+}
+
 function validEntry(value: any): value is LeaderboardEntry {
   if (!value || typeof value.id !== 'string' || !value.id.length || value.id.length > 160
       || !validInteger(value.score)) return false;
@@ -51,7 +110,7 @@ function ranked(entries: LeaderboardEntry[]): LeaderboardEntry[] {
     if (!validEntry(entry) || ids.has(entry.id)) return false;
     ids.add(entry.id);
     return true;
-  }).sort((a, b) => b.score - a.score
+  }).map(withNormalizedNickname).sort((a, b) => b.score - a.score
     || (b.perfectCount ?? -1) - (a.perfectCount ?? -1)
     || (a.finishedAt ?? 0) - (b.finishedAt ?? 0)
     || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)).slice(0, LEADERBOARD_LIMIT);
@@ -92,6 +151,7 @@ export class LocalLeaderboardRepository implements LeaderboardRepository {
     const entry: LeaderboardEntry = {
       id: result.id, kind: 'round', score: result.score,
       perfectCount: result.perfectCount, finishedAt: result.finishedAt,
+      nickname: result.nickname,
     };
     if (!validEntry(entry)) throw new Error('Invalid round result');
     if (!this.entries.some(saved => saved.id === entry.id)) {

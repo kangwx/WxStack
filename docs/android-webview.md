@@ -28,6 +28,10 @@ override fun dispatchKeyEvent(event: KeyEvent): Boolean {
 `webView.evaluateJavascript("window.WxStackRemote && window.WxStackRemote.dispatchKey(4,0,0)", null)`。
 只在游戏页启用该回调，其他页面保留宿主原有导航。不要同时转发同一次返回事件。
 
+昵称编辑时，网页会让普通文本按键和输入法直接进入原生输入框。宿主可通过
+`window.WxStackRemote.isTextEditing()` 查询编辑状态，并在自己的输入路由中对文本键、空格、退格、输入法组合事件放行给 WebView，不能把上面的全局拦截无条件用于文字输入。
+已经通过桥接转发的遥控器确认键会结束文字输入并选中“保存”，方向键切换输入/保存/取消，返回键取消。上述桥接只支持遥控导航，不代替系统输入法；应在宿主实机复测软键盘和外接键盘。
+
 实机验证：首页上下选项/确认、商店选中与返回、设置开关、游戏确认落块/返回暂停、
 结算重开/返回；长按确认不能连续落块，切后台再回来仍可操作，音量键保留系统功能。
 
