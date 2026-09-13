@@ -136,8 +136,8 @@ for (const [pixelWidth, pixelHeight] of [...displays, [320, 568], [360, 800]]) {
     });
     if (split) {
       assert.equal(p.rowYs.length, 3, 'wide preview shows the local Top 3');
-      assert.equal(p.panelWidth, 360);
-      assert.equal(p.panelHeight, 400);
+      assert.equal(p.panelWidth, 440);
+      assert.equal(p.panelHeight, 500);
       assert.ok(left >= home.panelX + home.panelWidth / 2 + 24, 'preview clears the home panel even at 4:3');
       const hintHalf = p.captionSize * 1.2 / 2;
       assert.ok(p.rowYs.at(-1) - scoreHalf > p.hintY + hintHalf, 'hint clears the last score');

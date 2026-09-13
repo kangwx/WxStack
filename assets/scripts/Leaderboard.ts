@@ -1,4 +1,5 @@
 export const LEADERBOARD_STORAGE_KEY = 'wxstack-leaderboard-v1';
+export const LEADERBOARD_PREVIEW_BACKUP_KEY = 'wxstack-leaderboard-before-preview-cleanup-v1';
 export const LEADERBOARD_LIMIT = 10;
 export const NICKNAME_STORAGE_KEY = 'wxstack-nickname';
 export const DEFAULT_NICKNAME = '叠叠玩家';
@@ -42,17 +43,18 @@ function validInteger(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
 }
 
+export function leaderboardTier(score: number): number {
+  const layers = validInteger(score) ? score : 0;
+  return layers >= 500 ? 5 : layers >= 350 ? 4 : layers >= 200 ? 3 : layers >= 100 ? 2 : layers >= 50 ? 1 : 0;
+}
+
 export function leaderboardTitle(score: number): string {
   const layers = validInteger(score) ? score : 0;
   if (layers >= 500) {
     const stars = Math.floor((layers - 500) / 100);
     return stars > 0 ? `王者 +${stars} 星` : '最强王者';
   }
-  if (layers >= 350) return '钻石';
-  if (layers >= 200) return '铂金';
-  if (layers >= 100) return '黄金';
-  if (layers >= 50) return '白银';
-  return '青铜';
+  return ['青铜', '白银', '黄金', '铂金', '钻石'][leaderboardTier(layers)];
 }
 
 /** Keep visible text intact; validation rejects long names instead of truncating.
@@ -116,10 +118,23 @@ function ranked(entries: LeaderboardEntry[]): LeaderboardEntry[] {
     || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)).slice(0, LEADERBOARD_LIMIT);
 }
 
+/** Exact fingerprints of the old UI preview fixture, never a score/name heuristic. */
+function isPreviewRecord(entry: any): boolean {
+  const scores = [1720, 1000, 700, 600, 500, 350, 200, 100, 50, 0];
+  const names = ['云端建筑师小山', '今天也要叠个正着', '对齐大师', '叠叠玩家', '星空旅人'];
+  const match = typeof entry?.id === 'string' ? /^design-([0-9])$/.exec(entry.id) : null;
+  if (!match) return false;
+  const index = Number(match[1]);
+  return entry.kind === 'round' && entry.finishedAt === 1700000000000
+    && entry.score === scores[index] && entry.perfectCount === Math.min(17, scores[index])
+    && entry.nickname === names[index % names.length];
+}
+
 /** Local data stays under the current origin; rejected storage falls back to memory. */
 export class LocalLeaderboardRepository implements LeaderboardRepository {
   private entries: LeaderboardEntry[] = [];
   private persistent = true;
+  private pendingPreviewBackup: string | null = null;
 
   constructor(private readonly storage: LeaderboardStorage | null, legacyBest = 0) {
     let initialized = false;
@@ -129,8 +144,13 @@ export class LocalLeaderboardRepository implements LeaderboardRepository {
       if (raw) {
         const saved = JSON.parse(raw);
         if (saved?.version === 1 && Array.isArray(saved.entries)) {
-          this.entries = ranked(saved.entries);
-          initialized = true;
+          const localEntries = saved.entries.filter((entry: unknown) => !isPreviewRecord(entry));
+          const hadPreview = localEntries.length !== saved.entries.length;
+          if (hadPreview) this.pendingPreviewBackup = raw;
+          this.entries = ranked(localEntries);
+          // If preview rows displaced the real rounds, preserve the independently
+          // saved personal best as a legacy record without inventing round details.
+          initialized = this.entries.length > 0 || !hadPreview;
         }
       }
     } catch {
@@ -168,6 +188,12 @@ export class LocalLeaderboardRepository implements LeaderboardRepository {
   private persist(): void {
     if (!this.storage) return;
     try {
+      if (this.pendingPreviewBackup) {
+        if (!this.storage.getItem(LEADERBOARD_PREVIEW_BACKUP_KEY)) {
+          this.storage.setItem(LEADERBOARD_PREVIEW_BACKUP_KEY, this.pendingPreviewBackup);
+        }
+        this.pendingPreviewBackup = null;
+      }
       this.storage.setItem(LEADERBOARD_STORAGE_KEY, JSON.stringify({ version: 1, entries: this.entries }));
       this.persistent = true;
     } catch {

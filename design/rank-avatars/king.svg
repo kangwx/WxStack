@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512"><title>最强王者 · 小国王</title><g transform="translate(256 256) scale(1 -1)"><circle cx="0" cy="0" r="232" fill="rgb(234,217,246)" fill-opacity="1"/>
+<circle cx="0" cy="0" r="218.08" fill="none" stroke="rgb(255,253,240)" stroke-opacity="1" stroke-width="9.28"/>
+<rect x="-143.84" y="-143.84" width="287.68" height="259.84" rx="106.72" fill="rgb(137,99,174)" fill-opacity="1"/>
+<rect x="-111.36" y="-116" width="222.72" height="180.96" rx="83.52" fill="rgb(255,242,215)" fill-opacity="1"/>
+<circle cx="-51.04" cy="0" r="17.632" fill="rgb(62,51,64)" fill-opacity="1"/>
+<circle cx="51.04" cy="0" r="17.632" fill="rgb(62,51,64)" fill-opacity="1"/>
+<circle cx="-88.16" cy="-46.4" r="18.56" fill="rgb(232,169,163)" fill-opacity="1"/>
+<circle cx="88.16" cy="-46.4" r="18.56" fill="rgb(232,169,163)" fill-opacity="1"/>
+<path d="M-23.2 -51.04 L0 -69.6 L23.2 -51.04" fill="none" stroke="rgb(62,51,64)" stroke-opacity="1" stroke-width="11.6"/>
+<path d="M-120.64 83.52 L-139.2 176.32 L-60.32 129.92 L0 204.16 L60.32 129.92 L139.2 176.32 L120.64 83.52 Z" fill="rgb(236,191,83)" fill-opacity="1"/>
+<rect x="-116" y="69.6" width="232" height="37.12" rx="13.92" fill="rgb(250,216,125)" fill-opacity="1"/>
+<path d="M0 143.84 L27.84 116 L0 88.16 L-27.84 116 Z" fill="rgb(177,91,133)" fill-opacity="1"/></g></svg>

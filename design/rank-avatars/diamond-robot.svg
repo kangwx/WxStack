@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512"><title>钻石 · 机器人</title><g transform="translate(256 256) scale(1 -1)"><circle cx="0" cy="0" r="232" fill="rgb(208,230,248)" fill-opacity="1"/>
+<circle cx="0" cy="0" r="218.08" fill="none" stroke="rgb(255,253,240)" stroke-opacity="1" stroke-width="9.28"/>
+<rect x="-13.92" y="92.8" width="27.84" height="74.24" rx="9.28" fill="rgb(82,130,193)" fill-opacity="1"/>
+<path d="M0 208.8 L46.4 167.04 L0 125.28 L-46.4 167.04 Z" fill="rgb(77,180,210)" fill-opacity="1"/>
+<rect x="-171.68" y="-46.4" width="41.76" height="83.52" rx="18.56" fill="rgb(82,130,193)" fill-opacity="1"/>
+<rect x="129.92" y="-46.4" width="41.76" height="83.52" rx="18.56" fill="rgb(82,130,193)" fill-opacity="1"/>
+<rect x="-143.84" y="-143.84" width="287.68" height="259.84" rx="46.4" fill="rgb(82,130,193)" fill-opacity="1"/>
+<rect x="-111.36" y="-116" width="222.72" height="180.96" rx="32.48" fill="rgb(255,242,215)" fill-opacity="1"/>
+<circle cx="-51.04" cy="0" r="17.632" fill="rgb(62,51,64)" fill-opacity="1"/>
+<circle cx="51.04" cy="0" r="17.632" fill="rgb(62,51,64)" fill-opacity="1"/>
+<circle cx="-88.16" cy="-46.4" r="18.56" fill="rgb(232,169,163)" fill-opacity="1"/>
+<circle cx="88.16" cy="-46.4" r="18.56" fill="rgb(232,169,163)" fill-opacity="1"/>
+<path d="M-23.2 -51.04 L0 -69.6 L23.2 -51.04" fill="none" stroke="rgb(62,51,64)" stroke-opacity="1" stroke-width="11.6"/></g></svg>

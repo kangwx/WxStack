@@ -842,15 +842,88 @@ test('all perfect frame waves project to the contact plane, including reduced mo
   }
 });
 
-test('minimal layers interpolate through teal, lime, orange and cream without abrupt wrap', () => {
+test('default layers repeat the eight-color pastel rainbow with distinct adjacent layers', () => {
   const game = Object.create(GamePrototype);
-  assert.deepEqual(Array.from(game.minimalLayerColor(16)), [174, 248, 124]);
-  assert.deepEqual(Array.from(game.minimalLayerColor(40)), [255, 234, 201]);
+  assert.deepEqual(Array.from(game.minimalLayerColor(0)), [153, 199, 199]);
+  assert.deepEqual(Array.from(game.minimalLayerColor(4)), [225, 175, 180]);
   for (let level = 0; level < 128; level += 1) {
     const a = game.minimalLayerColor(level);
     const b = game.minimalLayerColor(level + 1);
-    assert.ok(a.every((value, i) => Math.abs(value - b[i]) <= 23));
+    assert.notDeepEqual(a, b);
+    assert.deepEqual(a, game.minimalLayerColor(level + 8));
+    assert.ok(a.every(value => value >= 150 && value <= 240));
   }
+});
+
+test('toy theme adds a solid cream table and preserves block dimensions and resource ownership', () => {
+  const { world, base } = setup();
+  const pastel = { ...theme, softToy: true, backgroundColor: new cc.Color(210, 188, 181) };
+  world.setTheme(pastel);
+  const stage = world.toyStage;
+  const materials = Array.from(world.toyMaterials);
+  assert.equal(stage.active, true);
+  assert.equal(stage.children.length, 17);
+  const table = stage.getChildByName('TableCollision');
+  const collider = table.getComponent(BoxCollider);
+  assert.equal(table.getComponent(RigidBody).type, cc.ERigidBodyType.STATIC);
+  assert.equal(table.getComponent(RigidBody).useGravity, false);
+  assert.deepEqual(collider.size, new Vec3(9.2, 0.46, 9.2));
+  assert.ok(Math.abs(table.position.y + collider.size.y / 2 + 0.14) < 1e-8);
+  for (const node of stage.children) {
+    if (node === table) continue;
+    if (node.name === 'TowerPlinth' || node.name.startsWith('PastelToy-')) {
+      assert.deepEqual(node.getComponent(BoxCollider).size, Vec3.ONE);
+      assert.equal(node.getComponent(RigidBody).type, cc.ERigidBodyType.STATIC);
+      assert.equal(node.getComponent(RigidBody).useGravity, false);
+    } else {
+      assert.ok(!node.getComponent(BoxCollider), 'paint, shadows and the already-covered table mesh need no extra collider');
+      assert.ok(!node.getComponent(RigidBody));
+    }
+  }
+  assert.equal(stage.children.filter(node => node.getComponent(BoxCollider)).length, 8);
+  const plinth = stage.getChildByName('TowerPlinth');
+  assert.deepEqual(plinth.scale, new Vec3(5.55, 0.16, 5.55));
+  for (const node of stage.children.filter(node => node.name.startsWith('PastelToy-'))) {
+    assert.equal(node.scale.x, 0.62);
+    assert.equal(node.scale.z, 0.62);
+    assert.ok(Math.abs(node.position.y - node.scale.y / 2 + 0.14) < 1e-8);
+  }
+  const block = world.blockNodes.get(base);
+  assert.equal(block.getChildByName('BlockVisual').getComponent(MeshRenderer).mesh, world.toyMesh);
+  assert.equal(block.scale.x, base.width);
+  assert.equal(block.scale.z, base.depth);
+  assert.equal(world.backgroundMaterial.properties.mainColor, pastel.backgroundColor);
+  world.setTheme(theme);
+  assert.equal(stage.active, false);
+  world.setTheme(pastel);
+  assert.equal(world.toyStage, stage);
+  assert.deepEqual(Array.from(world.toyMaterials), materials);
+  world.reset();
+  assert.equal(stage.isValid, true);
+  assert.equal(stage.getChildByName('TableCollision'), table);
+  world.destroy();
+  assert.ok(materials.every(material => material.destroyed));
+});
+
+test('all stage contacts never award a layer and all falling bodies use continuous collision detection', () => {
+  const { world, base, moving } = setup();
+  world.setTheme({ ...theme, softToy: true });
+  world.beginDrop(moving, base);
+  assert.equal(world.droppingNode.getComponent(RigidBody).useCCD, true);
+  for (const node of world.toyStage.children.filter(node => node.getComponent(BoxCollider))) {
+    world.dropCollider.emit('onCollisionEnter', node.getComponent(BoxCollider));
+    world.dropCollider.emit('onCollisionStay', node.getComponent(BoxCollider));
+    assert.equal(world.pollDrop(0.01), null, `${node.name} is not the intended stack support`);
+  }
+  assert.equal(world.pollDrop(2), 'missed');
+  world.releaseMiss(moving, 'x', 1);
+  world.spawnFragment({ ...base, width: 0.1 }, 'x', 1);
+  assert.equal(world.looseNodes.size, 2);
+  for (const node of world.looseNodes.keys()) {
+    assert.equal(node.getComponent(RigidBody).useCCD, true);
+    assert.equal(node.getComponent(RigidBody).type, cc.ERigidBodyType.DYNAMIC);
+  }
+  world.destroy();
 });
 
 test('sharp image blocks use six faces and per-layer tints without modifying colliders', () => {

@@ -42,7 +42,7 @@ import { StackWorld3D, StackWorldTheme } from './StackWorld3D';
 import { androidGameKey, browserGameKey } from './RemoteInput';
 import {
   DEFAULT_NICKNAME, LeaderboardEntry, LeaderboardRepository, LocalLeaderboardRepository,
-  NICKNAME_MAX_LENGTH, leaderboardTitle, loadNickname, normalizeNickname, saveNickname,
+  NICKNAME_MAX_LENGTH, leaderboardTitle, leaderboardTier, loadNickname, normalizeNickname, saveNickname,
 } from './Leaderboard';
 import { projectorHudLayout, projectorLeaderboardPreviewLayout, projectorPanelLayout } from './ProjectorLayout';
 
@@ -203,28 +203,28 @@ const SKINS: Record<SkinId, SkinDefinition> = {
   'minimal-stack': {
     id: 'minimal-stack',
     visualStyle: 'minimal',
-    name: '极简叠境',
-    description: '初始免费 · 直边方块与连续渐变',
+    name: '奶油积木',
+    description: '初始免费 · 粉彩积木与奶油玩具台',
     blockAtlasResource: 'minimal-neutral-v2',
     backgroundResource: 'minimal-background-v2',
     blockAtlasOrder: [0],
     price: 0,
-    backgroundHue: 185,
-    backgroundSaturation: 28,
-    backgroundLightness: 40,
+    backgroundHue: 12,
+    backgroundSaturation: 24,
+    backgroundLightness: 78,
     blockHue: 166,
     blockHueStep: 5,
     blockSaturation: 48,
     blockLightness: 76,
     blockPalette: [[188, 235, 217], [145, 220, 204], [128, 200, 207], [145, 220, 204]],
-    shadow: [21, 49, 55],
-    titleColor: [255, 255, 245],
-    textColor: [30, 76, 71],
-    mutedColor: [43, 77, 78],
-    accentColor: [174, 241, 217],
-    secondaryAccentColor: [151, 219, 232],
-    panelColor: [18, 43, 50],
-    buttonColor: [31, 72, 78],
+    shadow: [133, 104, 106],
+    titleColor: [83, 67, 78],
+    textColor: [83, 67, 78],
+    mutedColor: [105, 86, 94],
+    accentColor: [174, 207, 197],
+    secondaryAccentColor: [201, 187, 214],
+    panelColor: [255, 248, 231],
+    buttonColor: [234, 215, 218],
   },
   classic: {
     id: 'classic',
@@ -535,6 +535,9 @@ export class StackGame extends Component {
   private homeLeaderboardPreviewEmpty!: Label;
   private homeLeaderboardPreviewRows: Label[] = [];
   private homeLeaderboardPreviewDetails: Label[] = [];
+  private homeLeaderboardPreviewRanks: Label[] = [];
+  private homeLeaderboardPreviewTitles: Label[] = [];
+  private homeLeaderboardPreviewSubtitle: Label;
   private homeLeaderboardPreviewEntries: LeaderboardEntry[] = [];
   private homeLeaderboardPreviewRequest = 0;
   private settingsGroup!: Node;
@@ -1076,6 +1079,10 @@ export class StackGame extends Component {
     this.homeLeaderboardPreviewTitle = this.makeLabel('PreviewTitle', this.homeLeaderboardPreview,
       '排行榜 →', 34, Color.WHITE, 312, 44);
     this.homeLeaderboardPreviewTitle.isBold = true;
+    this.homeLeaderboardPreviewSubtitle = this.makeLabel('PreviewSubtitle', this.homeLeaderboardPreview,
+      '本机 TOP 3 · 挑战新高度', 22, Color.WHITE, 352, 30);
+    this.homeLeaderboardPreviewRanks = [];
+    this.homeLeaderboardPreviewTitles = [];
     for (let index = 0; index < 3; index += 1) {
       const row = this.makeLabel(`PreviewRank-${index}`, this.homeLeaderboardPreview, '', 36, Color.WHITE, 312, 48);
       row.horizontalAlign = Label.HorizontalAlign.LEFT;
@@ -1083,11 +1090,17 @@ export class StackGame extends Component {
       const detail = this.makeLabel(`PreviewPlayer-${index}`, this.homeLeaderboardPreview, '', 22, Color.WHITE, 312, 28);
       detail.horizontalAlign = Label.HorizontalAlign.LEFT;
       this.homeLeaderboardPreviewDetails.push(detail);
+      const rank = this.makeLabel(`PreviewMedal-${index}`, this.homeLeaderboardPreview, `${index + 1}`, 26, Color.WHITE, 46, 42);
+      rank.isBold = true;
+      this.homeLeaderboardPreviewRanks.push(rank);
+      const title = this.makeLabel(`PreviewTitle-${index}`, this.homeLeaderboardPreview, '', 22, Color.WHITE, 190, 30);
+      title.horizontalAlign = Label.HorizontalAlign.LEFT;
+      this.homeLeaderboardPreviewTitles.push(title);
     }
     this.homeLeaderboardPreviewEmpty = this.makeLabel('PreviewEmpty', this.homeLeaderboardPreview,
       '正在加载…', 24, Color.WHITE, 312, 70);
     this.homeLeaderboardPreviewHint = this.makeLabel('PreviewHint', this.homeLeaderboardPreview,
-      '按 → 或点击展开', 24, Color.WHITE, 312, 34);
+      '查看完整榜单  →', 24, Color.WHITE, 312, 34);
   }
 
   private updateHomeLeaderboardPreviewUI(): void {
@@ -1095,14 +1108,15 @@ export class StackGame extends Component {
     const layout = projectorLeaderboardPreviewLayout(this.visibleWidth, this.visibleHeight);
     const compact = layout.rowYs.length === 1;
     const skin = this.currentSkin();
-    const text = this.textOnButton(skin.panelColor);
+    const text = skin.id === 'minimal-stack' ? this.rgb(skin.textColor) : this.textOnButton(skin.panelColor);
+    const soft = skin.id === 'minimal-stack';
     const g = this.homeLeaderboardPreviewGraphics;
     g.clear();
     g.fillColor = this.rgb(skin.panelColor);
     g.roundRect(-layout.panelWidth / 2, -layout.panelHeight / 2, layout.panelWidth, layout.panelHeight, compact ? 16 : 28);
     g.fill();
     g.lineWidth = 2;
-    g.strokeColor = this.rgb(skin.accentColor);
+    g.strokeColor = soft ? new Color(255, 255, 249) : this.rgb(skin.accentColor);
     g.roundRect(-layout.panelWidth / 2 + 2, -layout.panelHeight / 2 + 2,
       layout.panelWidth - 4, layout.panelHeight - 4, compact ? 14 : 26);
     g.stroke();
@@ -1114,24 +1128,72 @@ export class StackGame extends Component {
       label.enableWrapText = false;
       label.color = text;
     };
+    const column = (label: Label, x: number, width: number) => {
+      label.node.setPosition(x, label.node.position.y, 0);
+      const transform = label.node.getComponent(UITransform)!;
+      transform.setContentSize(width, transform.height);
+    };
     this.setCenteredNodeLayout(this.homeLeaderboardPreview, layout.panelX, layout.panelY);
     this.homeLeaderboardPreview.getComponent(UITransform)?.setContentSize(layout.panelWidth, layout.panelHeight);
     place(this.homeLeaderboardPreviewTitle, layout.titleY, layout.titleSize, compact ? 30 : 48);
+    if (compact && this.homeLeaderboardPreviewEntries.length) column(this.homeLeaderboardPreviewTitle, 22, layout.panelWidth - 70);
+    this.homeLeaderboardPreviewTitle.string = compact ? '排行榜 →' : '排行榜';
+    this.homeLeaderboardPreviewSubtitle.node.active = !compact;
+    place(this.homeLeaderboardPreviewSubtitle, layout.titleY - 43, 22, 30);
+    if (!compact) {
+      g.fillColor = this.rgb(skin.accentColor);
+      g.roundRect(-24, layout.titleY + 33, 48, 4, 2); g.fill();
+      g.fillColor = soft ? new Color(220, 235, 222) : this.rgb(skin.buttonColor);
+      g.roundRect(-layout.panelWidth / 2 + 24, layout.hintY - 24, layout.panelWidth - 48, 48, 18); g.fill();
+    }
     this.homeLeaderboardPreviewRows.forEach((row, index) => {
       const entry = this.homeLeaderboardPreviewEntries[index];
       row.node.active = !!entry && index < layout.rowYs.length;
-      row.string = entry ? `${index + 1}  ·  ${entry.score} 层` : '';
-      place(row, (layout.rowYs[index] ?? 0) + (compact ? 0 : 10), compact ? layout.scoreSize : 30, compact ? 30 : 36);
-      row.horizontalAlign = compact ? Label.HorizontalAlign.CENTER : Label.HorizontalAlign.LEFT;
+      row.string = entry ? (compact ? `${index + 1}  ·  ${entry.score} 层` : `${entry.score} 层`) : '';
+      const y = layout.rowYs[index] ?? 0;
+      place(row, y - (compact ? 0 : 19), compact ? layout.scoreSize : 30, compact ? 30 : 38);
+      row.isBold = true;
+      row.horizontalAlign = compact ? Label.HorizontalAlign.CENTER : Label.HorizontalAlign.RIGHT;
+      if (!compact) column(row, 133, 118);
+      else if (entry && index === 0) {
+        column(row, 22, layout.panelWidth - 70);
+        this.drawRankAvatar(g, -layout.panelWidth / 2 + 28, 0, 21, entry.score);
+      }
       const detail = this.homeLeaderboardPreviewDetails[index];
       detail.node.active = !!entry && !compact;
-      detail.string = entry ? `${entry.nickname || '本地玩家'} · ${leaderboardTitle(entry.score)}` : '';
-      place(detail, (layout.rowYs[index] ?? 0) - 24, 22, 26);
+      detail.string = entry ? entry.nickname || '本地玩家' : '';
+      place(detail, y + 23, 27, 34);
+      detail.isBold = index === 0;
+      column(detail, 47, 290);
+      const rank = this.homeLeaderboardPreviewRanks[index];
+      const title = this.homeLeaderboardPreviewTitles[index];
+      rank.node.active = title.node.active = !!entry && !compact;
+      title.string = entry ? leaderboardTitle(entry.score) : '';
+      place(title, y - 19, 22, 30); column(title, -20, 156);
+      place(rank, y - 22, 17, 24); column(rank, -144, 24);
+      rank.color = new Color(79, 62, 47);
+      if (entry && !compact) {
+        g.fillColor = soft ? (index === 0 ? new Color(248, 232, 196) : new Color(246, 237, 224))
+          : new Color(text.r, text.g, text.b, index === 0 ? 22 : 12);
+        g.roundRect(-layout.panelWidth / 2 + 18, y - 46, layout.panelWidth - 36, 92, 20); g.fill();
+        this.drawRankAvatar(g, -166, y + 4, 31, entry.score);
+        this.drawRankNumberBadge(g, -144, y - 22, 12, index);
+      }
     });
     this.homeLeaderboardPreviewEmpty.node.active = this.homeLeaderboardPreviewEntries.length === 0;
-    place(this.homeLeaderboardPreviewEmpty, compact ? layout.rowYs[0] : 0, layout.captionSize, compact ? 30 : 70);
+    place(this.homeLeaderboardPreviewEmpty, compact ? layout.rowYs[0] : -48, layout.captionSize, compact ? 30 : 70);
+    if (!compact && this.homeLeaderboardPreviewEmpty.node.active) {
+      // A small podium gives loading, empty and retry states the same visual identity.
+      for (const [x, height, color] of [
+        [-58, 42, [206, 216, 220]], [0, 70, [235, 194, 112]], [58, 30, [221, 179, 152]],
+      ] as [number, number, RGB][]) {
+        g.fillColor = this.rgb(color);
+        g.roundRect(x - 24, 12, 48, height, 10); g.fill();
+      }
+    }
     this.homeLeaderboardPreviewHint.node.active = !compact;
     place(this.homeLeaderboardPreviewHint, layout.hintY, layout.captionSize, 34);
+    if (!compact && !soft) this.homeLeaderboardPreviewHint.color = this.textOnButton(skin.buttonColor);
   }
 
   private async loadHomeLeaderboardPreview(): Promise<void> {
@@ -1267,14 +1329,17 @@ export class StackGame extends Component {
     if (!this.leaderboardGraphics) return;
     const layout = this.panelLayout('leaderboard');
     this.drawLeaderboardPanel();
-    const text = new Color(240, 250, 249, 255);
+    const soft = this.currentSkin().id === 'minimal-stack';
+    const text = soft ? new Color(83, 67, 78) : new Color(240, 250, 249, 255);
+    const secondary = soft ? new Color(105, 86, 94) : new Color(181, 212, 217, 255);
+    const accent = soft ? new Color(87, 126, 113) : new Color(148, 232, 207, 255);
     for (const name of ['LeaderboardTitle', 'LeaderboardStatus', 'LeaderboardRankHeading', 'LeaderboardColumns', 'LeaderboardScoreHeading', 'LeaderboardEmpty', 'LeaderboardScrollHint']) {
       this.setNamedLabelColor(this.leaderboardGroup, name, name === 'LeaderboardTitle' || name === 'LeaderboardEmpty'
-        ? text : new Color(181, 212, 217, 255));
+        ? text : secondary);
     }
     // Decorative divider and accent underline keep the header distinct from the moving list.
     const panel = this.leaderboardGraphics;
-    panel.fillColor = new Color(148, 232, 207, 255);
+    panel.fillColor = accent;
     panel.roundRect(-layout.contentWidth / 2, layout.subtitleY - 5, 68, 10, 5);
     panel.fill();
     panel.fillColor = new Color(text.r, text.g, text.b, 28);
@@ -1288,15 +1353,16 @@ export class StackGame extends Component {
       const currentRound = entry.id === this.submittedRoundId;
       row.graphics.clear();
       this.drawLeaderboardGradient(row.graphics, -layout.rowWidth / 2, -layout.rowHeight / 2,
-        layout.rowWidth, layout.rowHeight, 18, currentRound ? [48, 99, 101] : [39, 83, 87], [28, 65, 69]);
-      row.graphics.strokeColor = currentRound ? new Color(148, 232, 207, 255) : new Color(112, 182, 179, 80);
+        layout.rowWidth, layout.rowHeight, 18,
+        soft ? (currentRound ? [227, 241, 226] : [255, 253, 243]) : currentRound ? [48, 99, 101] : [39, 83, 87],
+        soft ? (currentRound ? [213, 233, 218] : [246, 234, 220]) : [28, 65, 69]);
+      row.graphics.strokeColor = currentRound ? accent : soft ? new Color(169, 139, 133, 75) : new Color(112, 182, 179, 80);
       row.graphics.lineWidth = currentRound ? 3 : 1;
       row.graphics.roundRect(-layout.rowWidth / 2, -layout.rowHeight / 2, layout.rowWidth, layout.rowHeight, 18);
       row.graphics.stroke();
-      // A numbered medal keeps the first three places distinct without relying on color alone.
-      if (rank < 3) {
-        this.drawLeaderboardMedal(row.graphics, layout.rankX, rank);
-      }
+      // Avatar follows the score tier; the small numbered badge follows list position.
+      this.drawRankAvatar(row.graphics, layout.rankX, 5, 40, entry.score);
+      this.drawRankNumberBadge(row.graphics, layout.rankX + 26, -28, 18, rank);
       row.rank.string = rank < 9 ? `0${rank + 1}` : `${rank + 1}`;
       row.player.string = `${entry.nickname || '本地玩家'}${currentRound ? ' · 本局' : ''}`;
       row.score.string = `${entry.score}`;
@@ -1307,12 +1373,12 @@ export class StackGame extends Component {
         const pad = (value: number) => value < 10 ? `0${value}` : `${value}`;
         row.detail.string = `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}  · 完美 ${entry.perfectCount} 次`;
       }
-      row.rank.color = rank < 3 ? new Color(56, 46, 31, 255) : new Color(168, 201, 207, 255);
+      row.rank.color = new Color(56, 46, 31, 255);
       row.score.color = text;
       row.player.color = text;
-      row.title.color = new Color(249, 222, 149, 255);
+      row.title.color = soft ? new Color(120, 81, 42) : new Color(249, 222, 149, 255);
       row.title.isBold = true;
-      row.detail.color = new Color(191, 216, 221, 255);
+      row.detail.color = soft ? secondary : new Color(191, 216, 221, 255);
     });
     this.leaderboardEmpty.node.active = this.leaderboardLoading || this.leaderboardEntries.length === 0;
     this.leaderboardPageLabel.string = this.leaderboardLoading ? '' : this.leaderboardEntries.length > 4
@@ -1320,7 +1386,7 @@ export class StackGame extends Component {
     this.leaderboardButtons.forEach(button => {
       button.graphics.clear();
       button.label.string = '';
-      button.graphics.strokeColor = new Color(148, 232, 207, 255);
+      button.graphics.strokeColor = accent;
       button.graphics.lineWidth = 4;
       button.graphics.moveTo(-17, -17);
       button.graphics.lineTo(17, 17);
@@ -1347,46 +1413,108 @@ export class StackGame extends Component {
   }
 
   private drawLeaderboardPanel(): void {
+    const soft = this.currentSkin().id === 'minimal-stack';
     const layout = this.panelLayout('leaderboard');
     const g = this.leaderboardGraphics;
     const w = layout.panelWidth;
     const h = layout.panelHeight;
     g.clear();
     for (const [inset, alpha] of [[14, 12], [7, 22], [0, 36]]) {
-      g.fillColor = new Color(8, 42, 43, alpha);
+      g.fillColor = soft ? new Color(133, 104, 106, alpha) : new Color(8, 42, 43, alpha);
       g.roundRect(-w / 2 - inset, -h / 2 - inset - 8, w + inset * 2, h + inset * 2, 44 + inset);
       g.fill();
     }
-    this.drawLeaderboardGradient(g, -w / 2, -h / 2, w, h, 44, [35, 85, 88], [16, 49, 54]);
-    g.strokeColor = new Color(111, 201, 191, 120);
+    if (soft) {
+      g.fillColor = new Color(255, 248, 231);
+      g.roundRect(-w / 2, -h / 2, w, h, 44);
+      g.fill();
+    } else {
+      this.drawLeaderboardGradient(g, -w / 2, -h / 2, w, h, 44, [35, 85, 88], [16, 49, 54]);
+    }
+    g.strokeColor = soft ? new Color(255, 255, 245, 220) : new Color(111, 201, 191, 120);
     g.lineWidth = 2;
     g.roundRect(-w / 2, -h / 2, w, h, 44);
     g.stroke();
     g.strokeColor = new Color(174, 234, 220, 30);
     g.roundRect(-w / 2 + 5, -h / 2 + 5, w - 10, h - 10, 40);
     g.stroke();
-    g.fillColor = new Color(9, 38, 42, 96);
+    g.fillColor = soft ? new Color(190, 157, 146, 32) : new Color(9, 38, 42, 96);
     g.roundRect(-layout.contentWidth / 2 - 6, layout.listTop - layout.listHeight - 4,
       layout.contentWidth + 12, layout.listHeight + 80, 24);
     g.fill();
   }
 
-  private drawLeaderboardMedal(g: Graphics, x: number, rank: number): void {
+  private drawRankNumberBadge(g: Graphics, x: number, y: number, radius: number, rank: number): void {
     const colors = [[245, 201, 105], [203, 221, 230], [220, 165, 126]];
-    const c = colors[rank];
-    g.fillColor = new Color(0, 20, 25, 65);
-    g.circle(x + 2, -6, 38);
-    g.fill();
-    g.fillColor = new Color(c[0], c[1], c[2], 255);
-    // Crown silhouette sits above a double-ring metal medallion.
-    g.moveTo(x - 17, 42); g.lineTo(x - 22, 58); g.lineTo(x - 8, 52);
-    g.lineTo(x, 66); g.lineTo(x + 8, 52); g.lineTo(x + 22, 58);
-    g.lineTo(x + 17, 42); g.close(); g.fill();
-    g.circle(x, 0, 37); g.fill();
-    g.strokeColor = new Color(255, 247, 217, 210);
-    g.lineWidth = 3; g.circle(x, 0, 34); g.stroke();
-    g.strokeColor = new Color(80, 55, 30, 75);
-    g.lineWidth = 2; g.circle(x, 0, 28); g.stroke();
+    const c = colors[rank] ?? [241, 231, 215];
+    g.fillColor = new Color(c[0], c[1], c[2]);
+    g.circle(x, y, radius); g.fill();
+    g.strokeColor = new Color(255, 250, 237);
+    g.lineWidth = 2; g.circle(x, y, radius); g.stroke();
+  }
+
+  /** Six code-drawn toy portraits: distinct silhouettes remain legible at HUD size. */
+  private drawRankAvatar(g: Graphics, x: number, y: number, radius: number, score: number): void {
+    const tier = leaderboardTier(score);
+    const backgrounds: readonly RGB[] = [[244, 220, 196], [226, 233, 243], [252, 234, 177],
+      [207, 235, 222], [208, 230, 248], [234, 217, 246]];
+    const coats: readonly RGB[] = [[179, 120, 81], [133, 153, 181], [204, 145, 49],
+      [68, 145, 129], [82, 130, 193], [137, 99, 174]];
+    const coat = coats[tier];
+    const face: RGB = [255, 242, 215];
+    const ink: RGB = [62, 51, 64];
+    const s = radius / 50;
+    const circle = (cx: number, cy: number, r: number, color: RGB) => {
+      g.fillColor = this.rgb(color); g.circle(x + cx * s, y + cy * s, r * s); g.fill();
+    };
+    const rect = (cx: number, cy: number, w: number, h: number, r: number, color: RGB) => {
+      g.fillColor = this.rgb(color);
+      g.roundRect(x + cx * s, y + cy * s, w * s, h * s, r * s); g.fill();
+    };
+    const polygon = (points: number[][], color: RGB) => {
+      g.fillColor = this.rgb(color);
+      g.moveTo(x + points[0][0] * s, y + points[0][1] * s);
+      for (const [px, py] of points.slice(1)) g.lineTo(x + px * s, y + py * s);
+      g.close(); g.fill();
+    };
+    circle(0, 0, 50, backgrounds[tier]);
+    g.strokeColor = new Color(255, 253, 240); g.lineWidth = 2 * s;
+    g.circle(x, y, 47 * s); g.stroke();
+    if (tier === 0) { // Bronze bear: rounded ears and a warm copper coat.
+      circle(-23, 23, 13, coat); circle(23, 23, 13, coat);
+      circle(-23, 23, 6, face); circle(23, 23, 6, face);
+    } else if (tier === 1) { // Silver cat: pointed ears.
+      polygon([[-31, 6], [-29, 38], [-6, 20]], coat);
+      polygon([[31, 6], [29, 38], [6, 20]], coat);
+    } else if (tier === 2) { // Golden lion: a broad sun-shaped mane.
+      polygon(Array.from({ length: 24 }, (_, i) => {
+        const angle = i * Math.PI / 12; const r = i % 2 ? 33 : 42;
+        return [Math.cos(angle) * r, Math.sin(angle) * r - 3];
+      }), coat);
+    } else if (tier === 3) { // Platinum owl: swept feathers and eye discs.
+      polygon([[-35, -23], [-38, 32], [-9, 18], [9, 18], [38, 32], [35, -23], [0, -39]], coat);
+    } else if (tier === 4) { // Diamond robot: square head and crystal antenna.
+      rect(-3, 20, 6, 16, 2, coat);
+      polygon([[0, 45], [10, 36], [0, 27], [-10, 36]], [77, 180, 210]);
+      rect(-37, -10, 9, 18, 4, coat); rect(28, -10, 9, 18, 4, coat);
+    }
+    rect(-31, -31, 62, 56, tier === 4 ? 10 : 23, coat);
+    rect(-24, -25, 48, 39, tier === 4 ? 7 : 18, face);
+    if (tier === 3) {
+      circle(-12, 1, 14, face); circle(12, 1, 14, face);
+      polygon([[-5, -8], [5, -8], [0, -16]], [204, 145, 49]);
+    }
+    circle(-11, 0, tier === 3 ? 5 : 3.8, ink); circle(11, 0, tier === 3 ? 5 : 3.8, ink);
+    if (tier !== 3) {
+      circle(-19, -10, 4, [232, 169, 163]); circle(19, -10, 4, [232, 169, 163]);
+      g.strokeColor = this.rgb(ink); g.lineWidth = 2.5 * s;
+      g.moveTo(x - 5 * s, y - 11 * s); g.lineTo(x, y - 15 * s); g.lineTo(x + 5 * s, y - 11 * s); g.stroke();
+    }
+    if (tier === 5) { // King: purple cloak, three-point crown and a ruby.
+      polygon([[-26, 18], [-30, 38], [-13, 28], [0, 44], [13, 28], [30, 38], [26, 18]], [236, 191, 83]);
+      rect(-25, 15, 50, 8, 3, [250, 216, 125]);
+      polygon([[0, 31], [6, 25], [0, 19], [-6, 25]], [177, 91, 133]);
+    }
   }
 
   private moveLeaderboardSelection(direction: number): void {
@@ -1426,7 +1554,7 @@ export class StackGame extends Component {
     g.fillColor = new Color(130, 189, 190, 90);
     g.roundRect(x, layout.listTop - layout.listHeight, 5, layout.listHeight, 2);
     g.fill();
-    g.fillColor = new Color(148, 232, 207, 255);
+    g.fillColor = this.currentSkin().id === 'minimal-stack' ? new Color(87, 126, 113) : new Color(148, 232, 207, 255);
     g.roundRect(x, layout.listTop - height - progress * (layout.listHeight - height), 5, height, 2);
     g.fill();
   }
@@ -1450,7 +1578,7 @@ export class StackGame extends Component {
       row.node.setPosition(0, rank.rowYs[index], 0);
       const scale = rank.rowHeight / 144;
       for (const [label, x, y, width, height, size] of [
-        [row.rank, rank.rankX, 0, rank.rankWidth, 68, 36],
+        [row.rank, rank.rankX + 26, -28, 36, 32, 22],
         [row.player, rank.detailX, 40, rank.split ? rank.detailWidth : rank.rowWidth - rank.rankWidth - 64, 40, rank.split ? 32 : 28],
         [row.title, rank.detailX, 0, rank.detailWidth, 36, 26],
         [row.detail, rank.detailX, -40, rank.rowWidth - rank.rankWidth - 64, 30, 22],
@@ -1916,7 +2044,7 @@ export class StackGame extends Component {
 
   private drawGameplayHudCards(): void {
     const skin = this.currentSkin();
-    const panelText = this.textOnButton(skin.panelColor);
+    const panelText = skin.id === 'minimal-stack' ? this.rgb(skin.textColor) : this.textOnButton(skin.panelColor);
     const layout = this.hudLayout();
     const drawCard = (graphics: Graphics): void => {
       graphics.clear();
@@ -4296,7 +4424,8 @@ export class StackGame extends Component {
     if (!this.backgroundSprite?.isValid) {
       return;
     }
-    this.backgroundSprite.spriteFrame = this.skinBackgrounds.get(this.selectedSkinId) ?? null;
+    this.backgroundSprite.spriteFrame = this.selectedSkinId === 'minimal-stack'
+      ? null : this.skinBackgrounds.get(this.selectedSkinId) ?? null;
     this.applyWorld3DTheme();
   }
 
@@ -4305,7 +4434,8 @@ export class StackGame extends Component {
       return;
     }
     const skin = this.currentSkin();
-    const blockColors = Array.from({ length: skin.visualStyle === 'minimal' ? 64 : 12 }, (_, level) => (
+    const softToy = skin.id === 'minimal-stack';
+    const blockColors = Array.from({ length: softToy ? 8 : 12 }, (_, level) => (
       this.blockColorsForSkin(skin, level, 255, this.hueForLevel(level)).top
     ));
     const materialTextures = skin.visualStyle === 'nature'
@@ -4318,13 +4448,15 @@ export class StackGame extends Component {
       ].filter((frame): frame is SpriteFrame => !!frame)
       : [];
     const theme: StackWorldTheme = {
-      background: this.skinBackgrounds.get(this.selectedSkinId) ?? null,
+      background: softToy ? null : this.skinBackgrounds.get(this.selectedSkinId) ?? null,
+      backgroundColor: softToy ? new Color(210, 188, 181) : undefined,
+      softToy,
       blockColors,
       materialTextures,
-      blockAtlas: this.blockAtlases.get(this.selectedSkinId) ?? null,
+      blockAtlas: softToy ? null : this.blockAtlases.get(this.selectedSkinId) ?? null,
       blockAtlasOrder: skin.blockAtlasOrder,
       tintAtlas: skin.visualStyle === 'minimal',
-      sharpEdges: skin.visualStyle === 'minimal',
+      sharpEdges: false,
       outlineColor: skin.visualStyle === 'cyber' ? new Color(166, 245, 255, 255) : undefined,
       accentColor: this.rgb(skin.accentColor),
       roughness: skin.visualStyle === 'cyber' ? 0.3 : skin.visualStyle === 'porcelain' ? 0.4 : 0.68,
@@ -4354,21 +4486,12 @@ export class StackGame extends Component {
   }
 
   private minimalLayerColor(level: number): RGB {
-    // Eight layers per stop, including a smooth wrap back to the first color.
+    // A discrete pastel rainbow makes each successful layer easy to count.
     const stops: readonly RGB[] = [
-      [59, 80, 109], [51, 179, 185], [174, 248, 124], [229, 168, 65],
-      [231, 119, 43], [255, 234, 201], [168, 166, 223], [73, 138, 175],
+      [153, 199, 199], [179, 211, 178], [222, 217, 153], [236, 200, 161],
+      [225, 175, 180], [197, 177, 208], [175, 185, 214], [161, 203, 214],
     ];
-    const position = (Math.abs(level) % 64) / 8;
-    const index = Math.floor(position);
-    const t = position - index;
-    const from = stops[index];
-    const to = stops[(index + 1) % stops.length];
-    return [
-      Math.round(from[0] + (to[0] - from[0]) * t),
-      Math.round(from[1] + (to[1] - from[1]) * t),
-      Math.round(from[2] + (to[2] - from[2]) * t),
-    ];
+    return stops[Math.floor(Math.abs(level)) % stops.length];
   }
 
   private blockColorsForSkin(
@@ -4405,7 +4528,7 @@ export class StackGame extends Component {
         outline: this.rgb(skin.accentColor, Math.round(opacity * 0.88)),
       };
     }
-    if (skin.visualStyle === 'pastel') {
+    if (skin.visualStyle === 'pastel' || skin.visualStyle === 'minimal') {
       return {
         top,
         left: this.shade(top, 0.82, opacity),
@@ -4437,7 +4560,7 @@ export class StackGame extends Component {
     const title = this.rgb(skin.titleColor);
     const text = this.rgb(skin.textColor);
     const muted = this.rgb(skin.mutedColor);
-    const panelText = this.textOnButton(skin.panelColor);
+    const panelText = skin.id === 'minimal-stack' ? text : this.textOnButton(skin.panelColor);
 
     this.setNamedLabelColor(this.startGroup, 'Title', panelText);
     this.setNamedLabelColor(this.startGroup, 'Eyebrow', panelText);
@@ -4462,7 +4585,7 @@ export class StackGame extends Component {
       badge.stroke();
     }
     this.testModeBadgeLabel.color = text;
-    this.perfectLabel.color = this.rgb(skin.accentColor);
+    this.perfectLabel.color = skin.id === 'minimal-stack' ? new Color(114, 66, 84) : this.rgb(skin.accentColor);
 
     this.resultTitleLabel.color = panelText;
     this.resultScoreLabel.color = panelText;

@@ -9,7 +9,7 @@ const sandbox = { exports: {} };
 const source = fs.readFileSync(path.join(__dirname, '../assets/scripts/Leaderboard.ts'), 'utf8');
 vm.runInNewContext(ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020 } }).outputText, sandbox);
 const {
-  LocalLeaderboardRepository, LEADERBOARD_STORAGE_KEY, leaderboardTitle,
+  LocalLeaderboardRepository, LEADERBOARD_STORAGE_KEY, LEADERBOARD_PREVIEW_BACKUP_KEY, leaderboardTitle, leaderboardTier,
   NICKNAME_STORAGE_KEY, DEFAULT_NICKNAME, NICKNAME_MAX_LENGTH,
   normalizeNickname, loadNickname, saveNickname,
 } = sandbox.exports;
@@ -21,6 +21,76 @@ function storage(initial = null) {
 function round(id, score, perfectCount = 0, finishedAt = 100) {
   return { id, score, perfectCount, finishedAt, testMode: false };
 }
+
+test('each rank tier selects a distinct avatar and king stars retain the king avatar', () => {
+  for (const [score, tier] of [[0, 0], [49, 0], [50, 1], [99, 1], [100, 2], [199, 2],
+    [200, 3], [349, 3], [350, 4], [499, 4], [500, 5], [599, 5], [600, 5], [1700, 5]]) {
+    assert.equal(leaderboardTier(score), tier);
+  }
+  for (const score of [-1, NaN, Infinity, '500']) assert.equal(leaderboardTier(score), 0);
+  assert.equal(leaderboardTitle(600), '王者 +1 星');
+});
+
+function previewRecord(index = 0) {
+  const scores = [1720, 1000, 700, 600, 500, 350, 200, 100, 50, 0];
+  const names = ['云端建筑师小山', '今天也要叠个正着', '对齐大师', '叠叠玩家', '星空旅人'];
+  return { id: `design-${index}`, kind: 'round', score: scores[index], perfectCount: Math.min(17, scores[index]),
+    finishedAt: 1700000000000, nickname: names[index % names.length] };
+}
+
+test('preview cleanup backs up the original store and keeps real local rounds across reloads', async () => {
+  const real = { ...round('round-real', 14, 7, 1789295575294), kind: 'round', nickname: '叠叠玩家' };
+  const original = JSON.stringify({ version: 1, entries: [...Array.from({ length: 10 }, (_, i) => previewRecord(i)), real] });
+  const store = storage(original);
+  const repo = new LocalLeaderboardRepository(store, 14);
+  assert.deepEqual(plain((await repo.list()).entries).map(e => e.id), ['round-real']);
+  assert.equal(store.getItem(LEADERBOARD_PREVIEW_BACKUP_KEY), original);
+  assert.deepEqual(JSON.parse(store.getItem(LEADERBOARD_STORAGE_KEY)).entries.map(e => e.id), ['round-real']);
+  await repo.submit(round('round-next', 20, 8));
+  const reloaded = await new LocalLeaderboardRepository(store, 20).list();
+  assert.deepEqual(plain(reloaded.entries).map(e => e.score), [20, 14]);
+  assert.equal(store.getItem(LEADERBOARD_PREVIEW_BACKUP_KEY), original, 'backup remains recoverable');
+});
+
+test('cleanup matches full fixture fingerprints, never genuine high scores or matching nicknames', async () => {
+  const entries = [
+    { ...previewRecord(), id: 'round-real-high' },
+    { ...previewRecord(1), finishedAt: 1789295575294 },
+    { ...previewRecord(2), score: 701 },
+    { ...previewRecord(3), nickname: '真实玩家' },
+    { ...previewRecord(4), perfectCount: 18 },
+  ];
+  const store = storage(JSON.stringify({ version: 1, entries }));
+  assert.equal((await new LocalLeaderboardRepository(store).list()).entries.length, entries.length);
+  assert.equal(store.getItem(LEADERBOARD_PREVIEW_BACKUP_KEY), null);
+});
+
+test('a preview-only store restores a real legacy best, but no record is fabricated for a new player', async () => {
+  const original = JSON.stringify({ version: 1, entries: [previewRecord()] });
+  const restored = (await new LocalLeaderboardRepository(storage(original), 14).list()).entries;
+  assert.deepEqual(plain(restored), [{ id: 'legacy-best', kind: 'legacy', score: 14, perfectCount: null, finishedAt: null }]);
+  assert.equal((await new LocalLeaderboardRepository(storage(original), 0).list()).entries.length, 0);
+});
+
+test('failed preview backup does not overwrite the original store and retries before later writes', async () => {
+  const original = JSON.stringify({ version: 1, entries: [previewRecord()] });
+  const store = storage(original);
+  const write = store.setItem;
+  let blocked = true;
+  store.setItem = (key, value) => {
+    if (key === LEADERBOARD_PREVIEW_BACKUP_KEY && blocked) throw Error('quota');
+    write(key, value);
+  };
+  const repo = new LocalLeaderboardRepository(store);
+  assert.equal((await repo.list()).persistent, false);
+  assert.equal((await repo.list()).entries.length, 0);
+  await repo.submit(round('round-new', 3));
+  assert.equal(store.getItem(LEADERBOARD_STORAGE_KEY), original);
+  blocked = false;
+  await repo.submit(round('round-next', 4));
+  assert.equal(store.getItem(LEADERBOARD_PREVIEW_BACKUP_KEY), original);
+  assert.deepEqual(JSON.parse(store.getItem(LEADERBOARD_STORAGE_KEY)).entries.map(e => e.score), [4, 3]);
+});
 
 test('round titles change at each layer threshold, independently of personal bests', () => {
   for (const [score, title] of [

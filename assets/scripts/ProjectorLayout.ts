@@ -130,19 +130,19 @@ export function projectorLeaderboardPreviewLayout(
   height: number,
 ): ProjectorLeaderboardPreviewGeometry {
   const { split, focusWidth, safe } = frame(width, height);
-  const panelWidth = split ? 360 : Math.min(320, width * 0.46);
-  const panelHeight = split ? 400 : 80;
+  const panelWidth = split ? 440 : Math.min(320, width * 0.46);
+  const panelHeight = split ? 500 : 80;
   return {
     panelX: focusWidth / 2 - safe - panelWidth / 2,
     panelY: height / 2 - safe - panelHeight / 2,
     panelWidth,
     panelHeight,
-    titleY: split ? 144 : 18,
-    titleSize: split ? 34 : 24,
+    titleY: split ? 204 : 18,
+    titleSize: split ? 38 : 24,
     scoreSize: split ? 36 : 24,
     captionSize: split ? 24 : 22,
-    rowYs: split ? [72, 0, -72] : [-16],
-    hintY: split ? -155 : -28,
+    rowYs: split ? [94, -12, -118] : [-16],
+    hintY: split ? -211 : -28,
   };
 }
 

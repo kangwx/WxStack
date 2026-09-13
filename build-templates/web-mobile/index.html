@@ -37,7 +37,7 @@
     body,
     #GameDiv,
     #Cocos3dGameContainer {
-      background: #63d7c1;
+      background: #d2bcb5;
     }
 
     #GameCanvas {
@@ -63,7 +63,7 @@
       overflow: hidden;
       background:
         radial-gradient(circle at 50% 18%, rgba(255, 255, 255, 0.22), transparent 42%),
-        linear-gradient(180deg, #55d2c3 0%, #7fe3af 54%, #b7fb69 100%);
+        linear-gradient(180deg, #e8d7d0 0%, #d2bcb5 100%);
       opacity: 1;
       visibility: visible;
       transition: opacity 180ms ease-out, visibility 0s linear 180ms;
@@ -81,7 +81,7 @@
       justify-content: center;
       text-align: center;
       max-width: 100%;
-      color: #173f3c;
+      color: #53434e;
       font-family: Helvetica, Verdana, Arial, sans-serif;
     }
 
@@ -102,13 +102,13 @@
       height: 18px;
       height: clamp(15px, 1.8vw, 24px);
       border: 1px solid rgba(255, 255, 255, 0.72);
-      border-radius: 4px;
-      background: rgba(255, 255, 255, 0.48);
-      box-shadow: 0 8px 22px rgba(22, 80, 72, 0.12);
+      border-radius: 7px;
+      background: #aecfc5;
+      box-shadow: 0 8px 22px rgba(133, 104, 106, 0.12);
       animation: boot-block-breathe 1.2s ease-in-out infinite alternate;
     }
 
-    .game-boot-block:nth-child(1) { transform: translateX(10%); }
+    .game-boot-block:nth-child(1) { transform: translateX(10%); background: #c5b1d0; }
     .game-boot-block:nth-child(2) { transform: translateX(-8%); animation-delay: 120ms; }
     .game-boot-block:nth-child(3) { transform: translateX(3%); animation-delay: 240ms; }
 

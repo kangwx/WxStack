@@ -30,6 +30,8 @@ export interface WorldBlockState {
 
 export interface StackWorldTheme {
   background: SpriteFrame | null;
+  backgroundColor?: Color;
+  softToy?: boolean;
   blockColors: readonly Color[];
   materialTextures: readonly SpriteFrame[];
   /** Three columns of materials; top faces in row 0, side faces in row 1. */
@@ -77,6 +79,9 @@ export class StackWorld3D {
   private readonly blockMesh: Mesh;
   private readonly decoratedMeshes: Mesh[] = [];
   private readonly sharpMesh: Mesh;
+  private readonly toyMesh: Mesh;
+  private toyStage: Node | null = null;
+  private readonly toyMaterials = new Set<Material>();
   private outlineMesh: Mesh | null = null;
   private readonly blockMaterials = new Map<string, Material>();
   private readonly presentationMaterials = new Map<Material, { material: Material; color: Color }>();
@@ -110,6 +115,7 @@ export class StackWorld3D {
     }
     this.blockMesh = utils.createMesh(box);
     this.sharpMesh = utils.createMesh(this.decoratedBlockGeometry(0, true));
+    this.toyMesh = utils.createMesh(this.decoratedBlockGeometry(0, false, true));
     for (let variant = 0; variant < 3; variant += 1) {
       this.decoratedMeshes.push(utils.createMesh(this.decoratedBlockGeometry(variant)));
     }
@@ -185,7 +191,7 @@ export class StackWorld3D {
       effectName: 'builtin-unlit',
       defines: hasBackground ? { USE_TEXTURE: true } : undefined,
     });
-    background.setProperty('mainColor', Color.WHITE);
+    background.setProperty('mainColor', hasBackground ? Color.WHITE : theme.backgroundColor ?? Color.WHITE);
     if (hasBackground) {
       background.setProperty('mainTexture', theme.background!.texture);
     }
@@ -193,6 +199,9 @@ export class StackWorld3D {
     this.backgroundMaterial = background;
     this.ownedMaterials.add(background);
     this.updateBackdropTransform();
+    if (theme.softToy && !this.toyStage) this.createToyStage();
+    if (this.toyStage) this.toyStage.active = !!theme.softToy;
+    this.updateCameraTransform(0, 0);
 
     for (const [block, node] of this.blockNodes) {
       this.applyBlockMaterial(node, block.level);
@@ -258,6 +267,7 @@ export class StackWorld3D {
     collider.on('onCollisionStay', this.onDropCollision, this);
     body.type = ERigidBodyType.DYNAMIC;
     body.mass = Math.max(0.45, block.width * block.depth * 0.07);
+    body.useCCD = true;
     body.useGravity = true;
     body.linearDamping = 0.06;
     body.angularDamping = 0.92;
@@ -319,6 +329,7 @@ export class StackWorld3D {
     this.looseNodes.set(node, 0);
     const body = node.getComponent(RigidBody)!;
     body.type = ERigidBodyType.DYNAMIC;
+    body.useCCD = true;
     body.useGravity = true;
     body.linearFactor = Vec3.ONE;
     body.angularFactor = Vec3.ONE;
@@ -346,6 +357,7 @@ export class StackWorld3D {
     const body = node.getComponent(RigidBody)!;
     body.type = ERigidBodyType.DYNAMIC;
     body.mass = Math.max(0.18, fragment.width * fragment.depth * 0.06);
+    body.useCCD = true;
     body.useGravity = true;
     body.linearDamping = 0.03;
     body.angularDamping = 0.08;
@@ -487,6 +499,9 @@ export class StackWorld3D {
       mesh.destroy();
     }
     this.sharpMesh.destroy();
+    this.toyMesh.destroy();
+    for (const material of this.toyMaterials) material.destroy();
+    this.toyMaterials.clear();
     this.outlineMesh?.destroy();
     for (const material of this.ownedMaterials) {
       material.destroy();
@@ -546,7 +561,7 @@ export class StackWorld3D {
     if (renderer) {
       const order = this.theme?.blockAtlasOrder;
       const variant = order?.length ? order[Math.abs(level) % order.length] : Math.abs(level) % 3;
-      renderer.mesh = this.theme?.blockAtlas?.texture
+      renderer.mesh = this.theme?.softToy ? this.toyMesh : this.theme?.blockAtlas?.texture
         ? (this.theme.sharpEdges ? this.sharpMesh : this.decoratedMeshes[variant])
         : this.blockMesh;
       renderer.setMaterial(this.presentationMaterial(this.materialForLevel(level)), 0);
@@ -638,14 +653,75 @@ export class StackWorld3D {
     return material;
   }
 
-  private decoratedBlockGeometry(variant: number, sharp = false) {
+  /** Every stage object is solid; shadows and painted inlays are visual-only. */
+  private createToyStage(): void {
+    const root = new Node('CreamToyStage');
+    root.layer = DEFAULT_LAYER;
+    this.worldRoot.addChild(root);
+    this.toyStage = root;
+    const materials = new Map<string, Material>();
+    const part = (name: string, position: number[], size: number[], rgb: number[], solid = false) => {
+      const key = rgb.join(',');
+      let material = materials.get(key);
+      if (!material) {
+        material = new Material(name);
+        material.initialize({ effectName: 'builtin-unlit', defines: { USE_VERTEX_COLOR: true } });
+        material.setProperty('mainColor', new Color(rgb[0], rgb[1], rgb[2]));
+        materials.set(key, material);
+        this.toyMaterials.add(material);
+      }
+      const node = new Node(name);
+      node.layer = DEFAULT_LAYER;
+      root.addChild(node);
+      node.setPosition(position[0], position[1], position[2]);
+      node.setScale(size[0], size[1], size[2]);
+      const renderer = node.addComponent(MeshRenderer);
+      renderer.mesh = this.toyMesh;
+      renderer.setMaterial(material, 0);
+      if (solid) {
+        // Match the rendered dimensions through node scale. Stage props stay
+        // fixed while dynamic blocks and cut fragments collide with them.
+        const body = node.addComponent(RigidBody);
+        body.type = ERigidBodyType.STATIC;
+        body.useGravity = false;
+        const collider = node.addComponent(BoxCollider);
+        collider.size = Vec3.ONE;
+      }
+    };
+    part('TableShadow', [0.18, -0.64, 0.2], [9.6, 0.08, 9.6], [181, 156, 150]);
+    part('RoseTableEdge', [0, -0.42, 0], [9.2, 0.36, 9.2], [223, 175, 181]);
+    part('CreamTableTop', [0, -0.2, 0], [9.2, 0.12, 9.2], [247, 232, 193]);
+    part('TowerPlinth', [0, -0.06, 0], [5.55, 0.16, 5.55], [224, 210, 191], true);
+    // One thick static box covers the cream surface and pink edge. Its top is
+    // exactly y = -0.14; it follows the stage's theme visibility and lifetime.
+    const table = new Node('TableCollision');
+    table.layer = DEFAULT_LAYER;
+    root.addChild(table);
+    table.setPosition(0, -0.37, 0);
+    const tableBody = table.addComponent(RigidBody);
+    tableBody.type = ERigidBodyType.STATIC;
+    tableBody.useGravity = false;
+    const tableCollider = table.addComponent(BoxCollider);
+    tableCollider.size = new Vec3(9.2, 0.46, 9.2);
+    const toys = [
+      [-3.6, -2.9, 0.56, 153, 199, 199], [3.5, -2.8, 0.65, 197, 177, 208],
+      [-3.6, 1.8, 0.85, 179, 211, 178], [3.6, 1.2, 0.78, 225, 175, 180],
+      [-1.5, 3.65, 0.42, 222, 217, 153], [1.65, 3.65, 0.65, 236, 200, 161],
+    ];
+    toys.forEach(([x, z, h, r, g, b], i) => {
+      part(`PastelToy-${i}`, [x, -0.14 + h / 2, z], [0.62, h, 0.62], [r, g, b], true);
+      part(`ToyInlay-${i}`, [x, h * 0.42 - 0.14, z + 0.313], [0.38, 0.035, 0.008], [251, 240, 207]);
+    });
+  }
+
+  private decoratedBlockGeometry(variant: number, sharp = false, soft = false) {
     const positions: number[] = [];
     const normals: number[] = [];
     const uvs: number[] = [];
     const colors: number[] = [];
     const indices: number[] = [];
     // A 0.06-world-unit bevel at the initial 5 x 0.62 x 5 block size.
-    const inner = sharp ? [0.5, 0.5, 0.5] : [0.488, 0.41, 0.488];
+    const inner = sharp ? [0.5, 0.5, 0.5] : soft ? [0.47, 0.37, 0.47] : [0.488, 0.41, 0.488];
     const addFace = (points: number[][], normal: number[]) => {
       const a = points[1].map((value, i) => value - points[0][i]);
       const b = points[2].map((value, i) => value - points[0][i]);
@@ -795,11 +871,14 @@ export class StackWorld3D {
     const sx = shakeX * 0.012;
     const sy = shakeY * 0.012;
     const overviewScale = this.cameraOverviewScale()
-      * (this.homePresentation ? HOME_PRESENTATION_DISTANCE_SCALE : 1);
-    const target = new Vec3(this.compositionOffsetX, this.cameraCurrentY, 0);
+      * (this.homePresentation ? (this.theme?.softToy ? 1.36 : HOME_PRESENTATION_DISTANCE_SCALE)
+        : this.theme?.softToy ? 1.08 : 1);
+    // The home still life includes the whole tabletop, not just the tower top.
+    const focusY = this.cameraCurrentY - (this.homePresentation && this.theme?.softToy ? 0.85 : 0);
+    const target = new Vec3(this.compositionOffsetX, focusY, 0);
     this.cameraNode.setPosition(
       10.8 * overviewScale + this.compositionOffsetX + sx,
-      this.cameraCurrentY + 9.2 * overviewScale + sy,
+      focusY + 9.2 * overviewScale + sy,
       13.6 * overviewScale,
     );
     this.cameraNode.lookAt(target, Vec3.UP);

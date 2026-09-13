@@ -483,22 +483,28 @@ test('home preview reflows its existing rows across portrait and projector sizes
       const row = nodes[index];
       assert.equal(game.homeLeaderboardPreviewRows[index], row, 'resize reuses labels');
       assert.equal(row.node.active, index < layout.rowYs.length);
-      assert.equal(row.string, `${index + 1}  ·  ${game.homeLeaderboardPreviewEntries[index].score} 层`);
+      assert.equal(row.string, layout.rowYs.length === 1
+        ? `${index + 1}  ·  ${game.homeLeaderboardPreviewEntries[index].score} 层`
+        : `${game.homeLeaderboardPreviewEntries[index].score} 层`);
       assert.equal(row.enableWrapText, false);
       assert.equal(row.overflow, Label.Overflow.SHRINK);
       const detail = game.homeLeaderboardPreviewDetails[index];
       const entry = game.homeLeaderboardPreviewEntries[index];
       assert.equal(detail.node.active, layout.rowYs.length > 1);
-      assert.equal(detail.string, `${entry.nickname || '本地玩家'} · ${leaderboardData.leaderboardTitle(entry.score)}`);
+      assert.equal(detail.string, entry.nickname || '本地玩家');
+      assert.equal(game.homeLeaderboardPreviewTitles[index].string, leaderboardData.leaderboardTitle(entry.score));
       assert.equal(detail.enableWrapText, false);
       assert.equal(detail.overflow, Label.Overflow.SHRINK);
       if (detail.node.active) {
-        assert.equal(row.node.position.y, layout.rowYs[index] + 10);
-        assert.equal(detail.node.position.y, layout.rowYs[index] - 24);
+        assert.equal(row.node.position.y, layout.rowYs[index] - 19);
+        assert.equal(detail.node.position.y, layout.rowYs[index] + 23);
         const rowBox = row.node.getComponent(UITransform);
         const detailBox = detail.node.getComponent(UITransform);
-        assert.ok(row.node.position.y - rowBox.height / 2 > detail.node.position.y + detailBox.height / 2);
+        assert.ok(detail.node.position.y - detailBox.height / 2 > row.node.position.y + rowBox.height / 2);
         assert.ok(detailBox.width <= hit.width - 48);
+        const title = game.homeLeaderboardPreviewTitles[index];
+        assert.ok(title.node.position.x + title.node.getComponent(UITransform).width / 2
+          < row.node.position.x - rowBox.width / 2, 'rank title and score have separate columns');
         if (index) {
           const previous = game.homeLeaderboardPreviewDetails[index - 1];
           assert.ok(previous.node.position.y - previous.node.getComponent(UITransform).height / 2
@@ -525,6 +531,30 @@ function previewFixture() {
   return game;
 }
 
+test('home preview uses separate medal, nickname, title and score fields with a clear open action', () => {
+  const game = makeHomeFixture(1920, 1080);
+  game.homeLeaderboardPreviewEntries = [123456, 600, 0].map((score, i) => ({ id: `card-${i}`, score,
+    nickname: '这是一个完整的十二字昵称' }));
+  game.updateHomeLeaderboardPreviewUI();
+  assert.equal(game.homeLeaderboardPreviewTitle.string, '排行榜');
+  assert.equal(game.homeLeaderboardPreviewHint.string, '查看完整榜单  →');
+  assert.equal(game.homeLeaderboardPreviewRows[0].string, '123456 层');
+  assert.equal(game.homeLeaderboardPreviewTitles[1].string, '王者 +1 星');
+  assert.equal(game.homeLeaderboardPreviewRows[2].string, '0 层');
+  for (let i = 0; i < 3; i++) {
+    assert.equal(game.homeLeaderboardPreviewRanks[i].string, `${i + 1}`);
+    assert.equal(game.homeLeaderboardPreviewDetails[i].string, '这是一个完整的十二字昵称');
+    assert.equal(game.homeLeaderboardPreviewRows[i].overflow, Label.Overflow.SHRINK);
+    assert.equal(game.homeLeaderboardPreviewDetails[i].overflow, Label.Overflow.SHRINK);
+  }
+  assert.ok(game.homeLeaderboardPreviewGraphics.rectangles.filter(shape => shape.circle).length > 6);
+  game.homeLeaderboardPreviewEntries = [];
+  game.updateHomeLeaderboardPreviewUI();
+  assert.equal(game.homeLeaderboardPreviewEmpty.node.active, true);
+  assert.ok(game.homeLeaderboardPreviewRanks.every(label => !label.node.active));
+  assert.ok(game.homeLeaderboardPreviewTitles.every(label => !label.node.active));
+});
+
 test('home preview waits for result submission and caches only the top three without changing full-panel data', async () => {
   const game = previewFixture();
   const submission = deferred();
@@ -537,7 +567,7 @@ test('home preview waits for result submission and caches only the top three wit
   game.homeLeaderboardPreviewEntries = [{ id: 'cached', score: 20 }];
   const loading = game.loadHomeLeaderboardPreview();
   assert.equal(requests, 0, 'list waits for a just-finished result to persist');
-  assert.equal(game.homeLeaderboardPreviewRows[0].string, '1  ·  20 层', 'cached score remains visible while loading');
+  assert.equal(game.homeLeaderboardPreviewRows[0].string, '20 层', 'cached score remains visible while loading');
   submission.resolve();
   await loading;
   assert.equal(requests, 1);
@@ -574,7 +604,7 @@ test('home preview ignores superseded responses and responses after navigation o
     response.resolve({ entries: [{ id: 'late', score: 100 }] });
     await loading;
     assert.equal(gone.homeLeaderboardPreviewEntries[0].score, 30);
-    assert.equal(gone.homeLeaderboardPreviewRows[0].string, '1  ·  30 层');
+    assert.equal(gone.homeLeaderboardPreviewRows[0].string, '30 层');
   }
 });
 
@@ -593,7 +623,7 @@ test('empty, unavailable and recovered home previews display a usable state', as
   game.leaderboard.list = async () => ({ entries: [{ id: 'recovered', score: 0 }] });
   await game.loadHomeLeaderboardPreview();
   assert.equal(game.homeLeaderboardPreviewEmpty.node.active, false);
-  assert.equal(game.homeLeaderboardPreviewRows[0].string, '1  ·  0 层', 'zero-score rounds remain valid entries');
+  assert.equal(game.homeLeaderboardPreviewRows[0].string, '0 层', 'zero-score rounds remain valid entries');
 });
 
 function contrast(foreground, background) {
@@ -621,6 +651,44 @@ function recordingGraphics() {
     stroke() { this.strokes.push({ color: this.strokeColor, width: this.lineWidth }); },
   };
 }
+
+test('six avatar silhouettes stay distinct, bounded, and independent of ranking position', () => {
+  const game = gameFor(1920, 1080);
+  const signatures = new Set();
+  for (const score of [0, 50, 100, 200, 350, 500]) {
+    const g = recordingGraphics();
+    const points = [];
+    g.moveTo = (x, y) => points.push(['move', x, y]);
+    g.lineTo = (x, y) => points.push(['line', x, y]);
+    game.drawRankAvatar(g, 0, 0, 40, score);
+    signatures.add(JSON.stringify([g.rectangles, points]));
+    assert.ok(points.every(([, x, y]) => Math.abs(x) <= 40 && Math.abs(y) <= 40));
+    for (const shape of g.rectangles) {
+      const left = shape.circle ? shape.x - shape.radius : shape.x;
+      const right = shape.circle ? shape.x + shape.radius : shape.x + shape.width;
+      const bottom = shape.circle ? shape.y - shape.radius : shape.y;
+      const top = shape.circle ? shape.y + shape.radius : shape.y + shape.height;
+      assert.ok(left >= -40 && right <= 40 && bottom >= -40 && top <= 40);
+    }
+  }
+  assert.equal(signatures.size, 6, 'each tier differs by geometry, not just tint');
+  const king = recordingGraphics(); const starred = recordingGraphics();
+  game.drawRankAvatar(king, 0, 0, 21, 500);
+  game.drawRankAvatar(starred, 0, 0, 21, 1700);
+  assert.deepEqual(king.rectangles, starred.rectangles);
+  const home = makeHomeFixture(1920, 1080);
+  const seen = [];
+  home.drawRankAvatar = (...args) => seen.push(args[4]);
+  home.homeLeaderboardPreviewEntries = [{ score: 14 }, { score: 350 }, { score: 500 }];
+  home.updateHomeLeaderboardPreviewUI();
+  assert.deepEqual(seen, [14, 350, 500], 'preview maps score, not list index');
+  const { game: full } = projectorFixture(1920, 1080);
+  const fullSeen = [];
+  full.drawRankAvatar = (...args) => fullSeen.push(args[4]);
+  full.leaderboardEntries = home.homeLeaderboardPreviewEntries;
+  full.updateLeaderboardUI();
+  assert.deepEqual(fullSeen, seen);
+});
 
 function recordingButton(game, group, name) {
   const ui = game.makeMenuButton(group, name, name, 1, 1);
@@ -929,7 +997,7 @@ test('the controller applies shared geometry to all panels, rows, hit targets an
       assert.equal(row.node.position.y, rank.rowYs[index]);
       assert.equal(row.node.getComponent(UITransform).width, rank.rowWidth);
       assert.equal(row.node.getComponent(UITransform).height, rank.rowHeight);
-      assert.equal(row.rank.node.position.x, rank.rankX);
+      assert.equal(row.rank.node.position.x, rank.rankX + 26);
       if (rank.split) assert.equal(row.player.node.position.x, rank.detailX);
       else assert.equal(row.player.node.position.x - row.player.node.getComponent(UITransform).width / 2,
         rank.detailX - rank.detailWidth / 2, 'phone nickname spans the row above its score');
@@ -1117,8 +1185,9 @@ test('ranking construction uses a masked native scroll viewport, ten reusable ro
   assert.equal(game.leaderboardViewport.events.get(ScrollView.EventType.SCROLLING).callback, GamePrototype.updateLeaderboardScrollTrack);
 });
 
-test('reference-design leaderboard keeps readable gold titles, layered medals and theme-independent dark panels', () => {
+test('alternate-skin leaderboard keeps readable gold titles and layered medals on dark panels', () => {
   const { game } = projectorFixture(1920, 1080);
+  game.selectedSkinId = 'classic';
   game.homeOverlay = 'leaderboard';
   game.leaderboardEntries = [700, 600, 500, 350].map((score, i) => ({ id: `design-${i}`, kind: 'round',
     nickname: '叠叠玩家', score, perfectCount: 3, finishedAt: 1700000000000 }));
@@ -1133,9 +1202,29 @@ test('reference-design leaderboard keeps readable gold titles, layered medals an
     assert.equal(row.title.isBold, true);
   }
   assert.ok(game.leaderboardRows.slice(0, 3).every(row => row.graphics.rectangles.filter(shape => shape.circle).length >= 4));
-  assert.equal(game.leaderboardRows[3].graphics.rectangles.some(shape => shape.circle), false);
+  assert.equal(game.leaderboardRows[3].graphics.rectangles.some(shape => shape.circle), true, 'every rank has a tier avatar');
   assert.equal(game.leaderboardButtons[0].graphics.rectangles.length, 0, 'close is a mint cross, not a filled menu button');
   assert.equal(game.leaderboardRows[0].player.string, '叠叠玩家 · 本局');
+});
+
+test('cream leaderboard retains readable text on normal and highlighted pastel rows', () => {
+  for (const [width, height] of [[750, 1334], [1440, 1080], [1920, 1080], [3440, 1440]]) {
+    const { game } = projectorFixture(width, height);
+    game.selectedSkinId = 'minimal-stack';
+    game.homeOverlay = 'leaderboard';
+    game.leaderboardEntries = [700, 500, 350, 0].map((score, i) => ({ id: `pastel-${i}`, kind: 'round',
+      nickname: '十二个字昵称完整显示测试中', score, perfectCount: 3, finishedAt: 1700000000000 }));
+    game.submittedRoundId = 'pastel-0';
+    game.updateLeaderboardUI();
+    for (const row of game.leaderboardRows.slice(0, 4)) {
+      for (const background of [[255, 253, 243], [246, 234, 220], [227, 241, 226], [213, 233, 218]]) {
+        for (const label of [row.player, row.title, row.score, row.detail]) {
+          assert.ok(contrast(label.color, background) >= 4.5, 'pastel text meets 4.5:1 contrast');
+        }
+      }
+    }
+    assert.equal(game.leaderboardRows[0].title.string, '王者 +2 星');
+  }
 });
 
 test('returning to the ready screen refreshes the leaderboard preview once after restoring the home state', () => {
@@ -1406,11 +1495,14 @@ test('every current theme supplies high-contrast home, preview and record-hint t
     const previewBackground = home.homeLeaderboardPreviewGraphics.fills[0];
     assert.deepEqual([previewBackground.r, previewBackground.g, previewBackground.b], Array.from(skin.panelColor));
     assert.equal(previewBackground.a, 255, `${id}: preview has its own opaque backdrop`);
-    for (const label of [home.homeLeaderboardPreviewTitle, home.homeLeaderboardPreviewHint,
-      home.homeLeaderboardPreviewEmpty, ...home.homeLeaderboardPreviewRows, ...home.homeLeaderboardPreviewDetails]) {
+    for (const label of [home.homeLeaderboardPreviewTitle, home.homeLeaderboardPreviewSubtitle,
+      home.homeLeaderboardPreviewEmpty, ...home.homeLeaderboardPreviewRows, ...home.homeLeaderboardPreviewDetails,
+      ...home.homeLeaderboardPreviewTitles]) {
       assert.ok(contrast(label.color, skin.panelColor) >= 4.5, `${id}: preview text remains readable`);
       assert.equal(label.color.a, 255);
     }
+    assert.ok(contrast(home.homeLeaderboardPreviewHint.color,
+      id === 'minimal-stack' ? [220, 235, 222] : skin.buttonColor) >= 4.5, `${id}: preview action is readable on its own fill`);
     game.drawGameplayHudCards();
     const hintBackground = game.recordGapGraphics.fills[0];
     assert.deepEqual([hintBackground.r, hintBackground.g, hintBackground.b], Array.from(skin.panelColor));
