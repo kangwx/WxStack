@@ -26,8 +26,6 @@ import {
   SafeArea,
   ScrollView,
   screen,
-  Sprite,
-  SpriteFrame,
   sys,
   tween,
   Tween,
@@ -38,19 +36,23 @@ import {
   view,
   Widget,
 } from 'cc';
-import { StackWorld3D, StackWorldTheme } from './StackWorld3D';
+import { StackWorld3D } from './StackWorld3D';
+import { CREAM_STYLE, RGB } from './CreamStyle';
 import { androidGameKey, browserGameKey } from './RemoteInput';
 import {
   DEFAULT_NICKNAME, LeaderboardEntry, LeaderboardRepository, LocalLeaderboardRepository,
   NICKNAME_MAX_LENGTH, leaderboardTitle, leaderboardTier, loadNickname, normalizeNickname, saveNickname,
 } from './Leaderboard';
 import { projectorHudLayout, projectorLeaderboardPreviewLayout, projectorPanelLayout } from './ProjectorLayout';
+import { Stamina, STAMINA_CAP } from './Stamina';
+import { ReviveClient, ReviveSession } from './ReviveClient';
 
 const { ccclass } = _decorator;
 
 const DESIGN_WIDTH = 750;
 const DESIGN_HEIGHT = 1334;
 const BASE_SIZE = 5;
+const REVIVE_BLOCK_SCALE = 0.5;
 const BLOCK_HEIGHT = 44;
 const BLOCK_3D_HEIGHT = 0.62;
 const MOVE_RANGE = 6.1;
@@ -87,14 +89,10 @@ const HOME_MENU_LEADERBOARD_Y = -122;
 const HOME_MENU_SETTINGS_Y = -244;
 const HOME_PANEL_WIDTH = 610;
 const HOME_PANEL_HEIGHT = 960;
-const SKIN_CARD_WIDTH = 520;
-const SKIN_CARD_HEIGHT = 112;
 const INITIAL_COINS = 100;
 const BEST_SCORE_STORAGE_KEY = 'wxstack-best-score';
 const COIN_STORAGE_KEY = 'wxstack-coins';
 const INITIAL_COIN_GRANT_STORAGE_KEY = 'wxstack-initial-coins-v1';
-const OWNED_SKINS_STORAGE_KEY = 'wxstack-owned-skins';
-const SELECTED_SKIN_STORAGE_KEY = 'wxstack-selected-skin';
 const SOUND_STORAGE_KEY = 'wxstack-sound-enabled';
 const REDUCED_MOTION_STORAGE_KEY = 'wxstack-reduced-motion';
 const NATURAL_MAJOR_INTERVALS = [0, 2, 4, 5, 7, 9, 11] as const;
@@ -104,7 +102,7 @@ const REMOTE_BACK_KEY_CODES = new Set([4, 461, 10009]);
 
 const COPY = {
   eyebrow: '轻松堆叠 · 挑战新高',
-  title: '叠个正着',
+  title: '叠高高',
   subtitle: '让每一次落点都恰到好处',
   start: '开始游戏',
   startRemote: '开始游戏',
@@ -128,12 +126,7 @@ const COPY = {
   reducedMotion: '减少动态效果',
   enabled: '开',
   disabled: '关',
-  skinTitle: '皮肤商店',
-  skinHint: '选择已拥有的皮肤，或使用金币解锁',
   close: '返回首页',
-  equipped: '使用中',
-  equip: '点击使用',
-  unlock: '金币解锁',
   perfectReward: '本局完美',
   noTestCoins: '测试模式不结算金币',
   pause: '暂停',
@@ -150,207 +143,13 @@ const COPY = {
 
 type GamePhase = 'ready' | 'playing' | 'dropping' | 'paused' | 'falling' | 'gameover';
 type MoveAxis = 'x' | 'z';
-const SKIN_IDS = ['minimal-stack', 'classic', 'cyber-neon', 'porcelain-moon', 'pastel-toy', 'nature-zen'] as const;
-type SkinId = typeof SKIN_IDS[number];
-const DEFAULT_SKIN_ID: SkinId = 'minimal-stack';
-const FREE_SKIN_IDS: readonly SkinId[] = [DEFAULT_SKIN_ID, 'classic'];
-type SkinVisualStyle = 'minimal' | 'breeze' | 'cyber' | 'porcelain' | 'pastel' | 'nature';
-type RGB = readonly [number, number, number];
-type HomeOverlay = 'none' | 'settings' | 'skins' | 'leaderboard';
-type NatureMaterialId = 'light-wood' | 'green-stone' | 'walnut';
-
-interface SkinDefinition {
-  id: SkinId;
-  visualStyle: SkinVisualStyle;
-  name: string;
-  description: string;
-  blockAtlasResource: string;
-  backgroundResource?: string;
-  blockAtlasOrder: readonly number[];
-  price: number;
-  backgroundHue: number;
-  backgroundSaturation: number;
-  backgroundLightness: number;
-  blockHue: number;
-  blockHueStep: number;
-  blockSaturation: number;
-  blockLightness: number;
-  blockPalette?: readonly RGB[];
-  shadow: RGB;
-  titleColor: RGB;
-  textColor: RGB;
-  mutedColor: RGB;
-  accentColor: RGB;
-  secondaryAccentColor: RGB;
-  panelColor: RGB;
-  buttonColor: RGB;
-}
+type HomeOverlay = 'none' | 'settings' | 'leaderboard';
 
 interface ButtonUI {
   node: Node;
   graphics: Graphics;
   label: Label;
 }
-
-interface SkinCardUI extends ButtonUI {
-  title: Label;
-  description: Label;
-  status: Label;
-  previewSprite: Sprite;
-}
-
-const SKINS: Record<SkinId, SkinDefinition> = {
-  'minimal-stack': {
-    id: 'minimal-stack',
-    visualStyle: 'minimal',
-    name: '奶油积木',
-    description: '初始免费 · 粉彩积木与奶油玩具台',
-    blockAtlasResource: 'minimal-neutral-v2',
-    backgroundResource: 'minimal-background-v2',
-    blockAtlasOrder: [0],
-    price: 0,
-    backgroundHue: 12,
-    backgroundSaturation: 24,
-    backgroundLightness: 78,
-    blockHue: 166,
-    blockHueStep: 5,
-    blockSaturation: 48,
-    blockLightness: 76,
-    blockPalette: [[188, 235, 217], [145, 220, 204], [128, 200, 207], [145, 220, 204]],
-    shadow: [133, 104, 106],
-    titleColor: [83, 67, 78],
-    textColor: [83, 67, 78],
-    mutedColor: [105, 86, 94],
-    accentColor: [174, 207, 197],
-    secondaryAccentColor: [201, 187, 214],
-    panelColor: [255, 248, 231],
-    buttonColor: [234, 215, 218],
-  },
-  classic: {
-    id: 'classic',
-    visualStyle: 'breeze',
-    name: '清风原野',
-    description: '清透树脂与轻盈叶纹',
-    blockAtlasResource: 'breeze-blocks-v2',
-    blockAtlasOrder: [0, 1, 2, 0, 1],
-    price: 0,
-    backgroundHue: 187,
-    backgroundSaturation: 56,
-    backgroundLightness: 53,
-    blockHue: 86,
-    blockHueStep: 16.5,
-    blockSaturation: 72,
-    blockLightness: 65,
-    shadow: [12, 42, 58],
-    titleColor: [255, 255, 255],
-    textColor: [255, 255, 255],
-    mutedColor: [215, 244, 247],
-    accentColor: [164, 246, 223],
-    secondaryAccentColor: [115, 220, 238],
-    panelColor: [7, 31, 43],
-    buttonColor: [18, 78, 90],
-  },
-  'cyber-neon': {
-    id: 'cyber-neon',
-    visualStyle: 'cyber',
-    name: '赛博霓虹',
-    description: '霓虹电路与金属光轨',
-    blockAtlasResource: 'cyber-blocks-v2',
-    blockAtlasOrder: [1, 0, 2, 1, 0],
-    price: 100,
-    backgroundHue: 235,
-    backgroundSaturation: 78,
-    backgroundLightness: 10,
-    blockHue: 190,
-    blockHueStep: 32,
-    blockSaturation: 96,
-    blockLightness: 58,
-    blockPalette: [[9, 216, 255], [38, 120, 255], [113, 59, 244], [246, 45, 196]],
-    shadow: [0, 2, 28],
-    titleColor: [240, 250, 255],
-    textColor: [235, 248, 255],
-    mutedColor: [141, 218, 255],
-    accentColor: [19, 226, 255],
-    secondaryAccentColor: [255, 47, 202],
-    panelColor: [5, 8, 35],
-    buttonColor: [25, 18, 72],
-  },
-  'porcelain-moon': {
-    id: 'porcelain-moon',
-    visualStyle: 'porcelain',
-    name: '东方瓷韵',
-    description: '青花白瓷与鎏金明月',
-    blockAtlasResource: 'porcelain-blocks-v2',
-    blockAtlasOrder: [2, 0, 1, 2, 0],
-    price: 200,
-    backgroundHue: 218,
-    backgroundSaturation: 68,
-    backgroundLightness: 20,
-    blockHue: 42,
-    blockHueStep: 2,
-    blockSaturation: 30,
-    blockLightness: 91,
-    blockPalette: [[247, 240, 219], [239, 235, 220], [250, 244, 226]],
-    shadow: [4, 24, 55],
-    titleColor: [18, 54, 94],
-    textColor: [249, 232, 190],
-    mutedColor: [221, 190, 126],
-    accentColor: [212, 161, 67],
-    secondaryAccentColor: [38, 91, 154],
-    panelColor: [8, 31, 66],
-    buttonColor: [245, 237, 215],
-  },
-  'pastel-toy': {
-    id: 'pastel-toy',
-    visualStyle: 'pastel',
-    name: '奶油玩具',
-    description: '奶油糖果色与星星压纹',
-    blockAtlasResource: 'pastel-blocks-v2',
-    blockAtlasOrder: [2, 1, 0, 2, 1],
-    price: 200,
-    backgroundHue: 43,
-    backgroundSaturation: 90,
-    backgroundLightness: 91,
-    blockHue: 162,
-    blockHueStep: 58,
-    blockSaturation: 60,
-    blockLightness: 72,
-    blockPalette: [[126, 225, 202], [145, 174, 236], [190, 129, 204], [255, 196, 80], [255, 123, 96]],
-    shadow: [136, 84, 69],
-    titleColor: [104, 56, 127],
-    textColor: [103, 57, 126],
-    mutedColor: [131, 92, 137],
-    accentColor: [255, 118, 91],
-    secondaryAccentColor: [255, 195, 74],
-    panelColor: [91, 52, 110],
-    buttonColor: [255, 118, 91],
-  },
-  'nature-zen': {
-    id: 'nature-zen',
-    visualStyle: 'nature',
-    name: '自然禅意',
-    description: '竹木山水与静谧涟漪',
-    blockAtlasResource: 'zen-blocks-v2',
-    blockAtlasOrder: [1, 0, 2, 1, 0],
-    price: 300,
-    backgroundHue: 48,
-    backgroundSaturation: 27,
-    backgroundLightness: 87,
-    blockHue: 42,
-    blockHueStep: 74,
-    blockSaturation: 37,
-    blockLightness: 58,
-    blockPalette: [[224, 185, 102], [57, 83, 62], [119, 78, 49], [205, 164, 89]],
-    shadow: [58, 75, 59],
-    titleColor: [45, 73, 58],
-    textColor: [45, 73, 58],
-    mutedColor: [82, 101, 84],
-    accentColor: [204, 158, 66],
-    secondaryAccentColor: [83, 104, 73],
-    panelColor: [39, 64, 49],
-    buttonColor: [49, 76, 58],
-  },
-};
 
 interface StackBlock {
   x: number;
@@ -413,47 +212,11 @@ interface Point2 {
   y: number;
 }
 
-interface RenderedBlock {
-  block: StackBlock;
-  offsetY: number;
-  rotation: number;
-  opacity: number;
-  offsetX: number;
-}
-
-interface BlockFaceGeometry {
-  top: Point2[];
-  bottom: Point2[];
-}
-
-interface NatureTextureFace {
-  maskNode: Node;
-  maskGraphics: Graphics;
-  spriteNode: Node;
-  sprite: Sprite;
-}
-
-interface NatureTextureBlock {
-  node: Node;
-  left: NatureTextureFace;
-  right: NatureTextureFace;
-  top: NatureTextureFace;
-}
-
 @ccclass('StackGame')
 export class StackGame extends Component {
   private world3D!: StackWorld3D;
   private graphics!: Graphics;
   private effectsGraphics!: Graphics;
-  private backgroundNode!: Node;
-  private backgroundSprite!: Sprite;
-  private skinBackgrounds = new Map<SkinId, SpriteFrame>();
-  private natureTextureRoot!: Node;
-  private natureTextureBlocks: NatureTextureBlock[] = [];
-  private natureMaterialFrames = new Map<NatureMaterialId, SpriteFrame>();
-  private blockAtlases = new Map<SkinId, SpriteFrame>();
-  private homeTowerPreviewNode!: Node;
-  private homeTowerPreviewSprite!: Sprite;
   private audioSource!: AudioSource;
   private audioClips = new Map<string, AudioClip>();
   private hudSafeRoot!: Node;
@@ -483,6 +246,17 @@ export class StackGame extends Component {
   private resultGroup!: Node;
   private resultRestartButton!: ButtonUI;
   private resultHomeButton!: ButtonUI;
+  private resultReviveButton!: ButtonUI;
+  private reviveGroup?: Node;
+  private reviveStatusLabel?: Label;
+  private reviveQr?: Graphics;
+  private reviveCloseButton?: ButtonUI;
+  private reviveClient?: ReviveClient;
+  private reviveSession?: ReviveSession;
+  private reviveRequest = 0;
+  private revivePolling = false;
+  private reviveUsed = false;
+  private roundRewardedPerfectCount = 0;
   private resultSelection = 0;
   private homeSelection = 0;
   private startButton!: Node;
@@ -545,6 +319,7 @@ export class StackGame extends Component {
   private soundToggle!: ButtonUI;
   private motionToggle!: ButtonUI;
   private settingsCloseButton!: ButtonUI;
+  private restoreStaminaButton!: ButtonUI;
   private nicknameButton!: ButtonUI;
   private nicknameLabel!: Label;
   private nicknameGroup!: Node;
@@ -560,13 +335,6 @@ export class StackGame extends Component {
   private playerNickname = DEFAULT_NICKNAME;
   private roundNickname = DEFAULT_NICKNAME;
   private nicknameStatus = '';
-  private skinsGroup!: Node;
-  private skinsGraphics!: Graphics;
-  private skinsCoinLabel!: Label;
-  private skinsHintLabel!: Label;
-  private skinCards = new Map<SkinId, SkinCardUI>();
-  private skinCardHandlers = new Map<SkinId, () => void>();
-  private skinsCloseButton!: ButtonUI;
   private resultCoinLabel!: Label;
   private leaderboard!: LeaderboardRepository;
   private leaderboardGroup!: Node;
@@ -607,12 +375,13 @@ export class StackGame extends Component {
   private roundPerfectCount = 0;
   private lastEarnedCoins = 0;
   private coins = INITIAL_COINS;
-  private ownedSkins = new Set<SkinId>(FREE_SKIN_IDS);
-  private selectedSkinId: SkinId = DEFAULT_SKIN_ID;
+  private stamina?: Stamina;
+  private homeStaminaLabel?: Label;
   private soundEnabled = true;
   private testModeEnabled = false;
   private moveAxis: MoveAxis = 'x';
   private moveDirection = 1;
+  private openingBlockEntering = false;
   private moveSpeed = INITIAL_MOVE_SPEED;
   private spawnDelay = 0;
   private resultDelay = 0;
@@ -622,7 +391,6 @@ export class StackGame extends Component {
   private phaseBeforePause: 'playing' | 'dropping' = 'playing';
   private homeOverlay: HomeOverlay = 'none';
   private settingsSelection = 0;
-  private skinSelection = 0;
 
   private visibleWidth = DESIGN_WIDTH;
   private visibleHeight = DESIGN_HEIGHT;
@@ -721,13 +489,16 @@ export class StackGame extends Component {
     view.setDesignResolutionSize(DESIGN_WIDTH, DESIGN_HEIGHT, ResolutionPolicy.FIXED_HEIGHT);
     this.initializeAudio();
     this.loadSettings();
+    this.stamina = new Stamina(sys.localStorage);
     this.leaderboard = new LocalLeaderboardRepository(sys.localStorage, this.bestScore);
     this.buildStage();
     this.resizeStage();
     this.showReadyScreen();
+    this.notifyBrowserReady();
   }
 
   onEnable(): void {
+    this.schedule(this.updateStaminaUI, 1);
     this.graphics.node.on(Node.EventType.TOUCH_END, this.onPointerAction, this);
     this.startButton.on(Button.EventType.CLICK, this.tryPrimaryAction, this);
     this.testModeToggle.on(Button.EventType.CLICK, this.onTestModeToggle, this);
@@ -737,11 +508,14 @@ export class StackGame extends Component {
     this.homeButton.on(Button.EventType.CLICK, this.onHomeButton, this);
     this.resultHomeButton.node.on(Button.EventType.CLICK, this.onHomeButton, this);
     this.resultRestartButton.node.on(Button.EventType.CLICK, this.tryRestartAction, this);
+    this.resultReviveButton.node.on(Button.EventType.CLICK, this.openRevive, this);
+    this.reviveCloseButton.node.on(Button.EventType.CLICK, this.closeRevive, this);
     this.settingsButton.on(Button.EventType.CLICK, this.onSettingsButton, this);
     this.leaderboardButton.on(Button.EventType.CLICK, this.onLeaderboardButton, this);
     this.homeLeaderboardPreview.on(Button.EventType.CLICK, this.onLeaderboardButton, this);
     this.soundToggle.node.on(Button.EventType.CLICK, this.onSoundToggle, this);
     this.motionToggle.node.on(Button.EventType.CLICK, this.onMotionToggle, this);
+    this.restoreStaminaButton.node.on(Button.EventType.CLICK, this.onRestoreStamina, this);
     this.settingsCloseButton.node.on(Button.EventType.CLICK, this.onCloseHomeOverlay, this);
     this.nicknameButton.node.on(Button.EventType.CLICK, this.openNicknameEditor, this);
     this.nicknameSaveButton.node.on(Button.EventType.CLICK, this.saveNicknameEditor, this);
@@ -749,14 +523,6 @@ export class StackGame extends Component {
     this.nicknameEditor.node.on(EditBox.EventType.EDITING_DID_BEGAN, this.onNicknameInputBegan, this);
     this.nicknameEditor.node.on(EditBox.EventType.EDITING_DID_ENDED, this.onNicknameInputEnded, this);
     this.nicknameEditor.node.on(EditBox.EventType.EDITING_RETURN, this.onNicknameInputReturn, this);
-    for (const skinId of SKIN_IDS) {
-      const card = this.skinCards.get(skinId);
-      const handler = this.skinCardHandlers.get(skinId);
-      if (card && handler) {
-        card.node.on(Button.EventType.CLICK, handler, this);
-      }
-    }
-    this.skinsCloseButton.node.on(Button.EventType.CLICK, this.onCloseHomeOverlay, this);
     this.leaderboardButtons.forEach((button, index) => {
       button.node.on(Button.EventType.CLICK, this.leaderboardHandlers[index], this);
     });
@@ -779,6 +545,8 @@ export class StackGame extends Component {
   }
 
   onDisable(): void {
+    this.closeRevive();
+    this.unschedule(this.updateStaminaUI);
     this.graphics.node.off(Node.EventType.TOUCH_END, this.onPointerAction, this);
     this.startButton.off(Button.EventType.CLICK, this.tryPrimaryAction, this);
     this.testModeToggle.off(Button.EventType.CLICK, this.onTestModeToggle, this);
@@ -788,12 +556,15 @@ export class StackGame extends Component {
     this.homeButton.off(Button.EventType.CLICK, this.onHomeButton, this);
     this.resultHomeButton.node.off(Button.EventType.CLICK, this.onHomeButton, this);
     this.resultRestartButton.node.off(Button.EventType.CLICK, this.tryRestartAction, this);
+    this.resultReviveButton.node.off(Button.EventType.CLICK, this.openRevive, this);
+    this.reviveCloseButton.node.off(Button.EventType.CLICK, this.closeRevive, this);
     this.settingsButton.off(Button.EventType.CLICK, this.onSettingsButton, this);
     this.leaderboardButton.off(Button.EventType.CLICK, this.onLeaderboardButton, this);
     this.homeLeaderboardPreview.off(Button.EventType.CLICK, this.onLeaderboardButton, this);
     this.homeLeaderboardPreviewRequest += 1;
     this.soundToggle.node.off(Button.EventType.CLICK, this.onSoundToggle, this);
     this.motionToggle.node.off(Button.EventType.CLICK, this.onMotionToggle, this);
+    this.restoreStaminaButton.node.off(Button.EventType.CLICK, this.onRestoreStamina, this);
     this.settingsCloseButton.node.off(Button.EventType.CLICK, this.onCloseHomeOverlay, this);
     this.nicknameButton.node.off(Button.EventType.CLICK, this.openNicknameEditor, this);
     this.nicknameSaveButton.node.off(Button.EventType.CLICK, this.saveNicknameEditor, this);
@@ -803,14 +574,6 @@ export class StackGame extends Component {
     this.nicknameEditor.node.off(EditBox.EventType.EDITING_RETURN, this.onNicknameInputReturn, this);
     this.nicknameEditor.blur();
     this.nicknameInputActive = false;
-    for (const skinId of SKIN_IDS) {
-      const card = this.skinCards.get(skinId);
-      const handler = this.skinCardHandlers.get(skinId);
-      if (card && handler) {
-        card.node.off(Button.EventType.CLICK, handler, this);
-      }
-    }
-    this.skinsCloseButton.node.off(Button.EventType.CLICK, this.onCloseHomeOverlay, this);
     this.leaderboardRequest += 1;
     this.leaderboardButtons.forEach((button, index) => {
       button.node.off(Button.EventType.CLICK, this.leaderboardHandlers[index], this);
@@ -922,26 +685,9 @@ export class StackGame extends Component {
     }
 
     this.world3D = new StackWorld3D(this.node, BLOCK_3D_HEIGHT);
-
-    this.backgroundNode = this.makeNode('ThemeBackground', this.node);
-    this.backgroundNode.addComponent(UITransform).setContentSize(DESIGN_WIDTH, DESIGN_HEIGHT);
-    this.backgroundSprite = this.backgroundNode.addComponent(Sprite);
-    this.backgroundSprite.sizeMode = Sprite.SizeMode.CUSTOM;
-    this.backgroundNode.active = false;
-
     const graphicsNode = this.makeNode('StackRenderer', this.node);
     graphicsNode.addComponent(UITransform).setContentSize(DESIGN_WIDTH, DESIGN_HEIGHT);
     this.graphics = graphicsNode.addComponent(Graphics);
-
-    this.natureTextureRoot = this.makeNode('NatureTextureBlocks', this.node);
-    this.natureTextureRoot.addComponent(UITransform).setContentSize(DESIGN_WIDTH, DESIGN_HEIGHT);
-
-    this.homeTowerPreviewNode = this.makeNode('NatureHomeTower', this.node);
-    this.homeTowerPreviewNode.addComponent(UITransform).setContentSize(405, 424);
-    this.homeTowerPreviewNode.setPosition(0, -287, 0);
-    this.homeTowerPreviewSprite = this.homeTowerPreviewNode.addComponent(Sprite);
-    this.homeTowerPreviewSprite.sizeMode = Sprite.SizeMode.CUSTOM;
-    this.homeTowerPreviewNode.active = false;
 
     const effectsNode = this.makeNode('StackEffects', this.node);
     effectsNode.addComponent(UITransform).setContentSize(DESIGN_WIDTH, DESIGN_HEIGHT);
@@ -993,6 +739,7 @@ export class StackGame extends Component {
     this.anchorCenter(this.homeCoinLabel.node, 0, 0);
     this.homeCoinCaption = this.makeCenteredLabel('HomeCoinCaption', this.startGroup, '金币', 28, 0, 280, 44, Color.WHITE);
     this.homeBestCaption = this.makeCenteredLabel('HomeBestCaption', this.startGroup, '最高纪录', 28, 0, 280, 44, Color.WHITE);
+    this.homeStaminaLabel = this.makeCenteredLabel('HomeStamina', this.startGroup, '', 24, 0, 560, 40, this.rgb(CREAM_STYLE.textColor));
     this.homeBestBadge = this.makeNode('HomeBestBadge', this.startGroup);
     this.homeBestBadge.addComponent(UITransform).setContentSize(400, 84);
     this.homeBestBadge.addComponent(Graphics);
@@ -1020,6 +767,7 @@ export class StackGame extends Component {
     this.resultScoreLabel = this.makeCenteredLabel('ResultScore', this.resultGroup, '0', 108, 62, 380, 128, new Color(255, 255, 255, 255));
     this.resultBestLabel = this.makeCenteredLabel('ResultBest', this.resultGroup, '', 27, -47, 520, 56, new Color(255, 255, 255, 220));
     this.resultCoinLabel = this.makeCenteredLabel('ResultCoins', this.resultGroup, '', 24, -116, 540, 48, new Color(255, 245, 190, 245));
+    this.resultReviveButton = this.makeOverlayButton(this.resultGroup, 'ResultRevive', '扫码复活', 400, 88, 0, -160);
     this.resultRestartButton = this.makeOverlayButton(this.resultGroup, 'ResultRestart', COPY.restartRound, 400, 88, 0, -220);
     this.resultHomeButton = this.makeOverlayButton(this.resultGroup, 'ResultHome', COPY.home, 400, 88, 0, -338);
     this.makeCenteredLabel('Restart', this.resultGroup, COPY.restart, 20, -430, 540, 42, new Color(255, 255, 255, 200));
@@ -1027,8 +775,158 @@ export class StackGame extends Component {
 
     this.buildPauseUI();
     this.buildHomeOverlays();
-    this.loadThemeBackgrounds();
-    this.loadBlockVisualAssets();
+    this.buildReviveUI();
+  }
+
+  private buildReviveUI(): void {
+    this.reviveGroup = this.makeFullNode('ReviveScreen', this.hudSafeRoot);
+    this.reviveGroup.addComponent(BlockInputEvents);
+    this.reviveGroup.addComponent(Graphics);
+    this.makeCenteredLabel('ReviveTitle', this.reviveGroup, '扫码复活', 48, 390, 540, 76, this.rgb(CREAM_STYLE.textColor));
+    this.makeCenteredLabel('ReviveHint', this.reviveGroup, '恢复半尺寸方块 · 每局一次 · 不扣体力', 24, 300, 540, 60, this.rgb(CREAM_STYLE.textColor));
+    const qr = this.makeNode('ReviveQR', this.reviveGroup);
+    qr.addComponent(UITransform).setContentSize(360, 360);
+    this.anchorCenter(qr, 0, 30);
+    this.reviveQr = qr.addComponent(Graphics);
+    this.reviveStatusLabel = this.makeCenteredLabel('ReviveStatus', this.reviveGroup, '', 26, -245, 540, 108, this.rgb(CREAM_STYLE.textColor));
+    this.reviveCloseButton = this.makeOverlayButton(this.reviveGroup, 'ReviveClose', '返回结算', 480, 96, 0, -390);
+    this.layoutReviveUI();
+    this.reviveGroup.active = false;
+  }
+
+  private layoutReviveUI(): void {
+    if (!this.reviveGroup) return;
+    const width = Math.min(640, this.visibleWidth - 56);
+    const height = Math.min(1040, this.visibleHeight - 128);
+    const scale = height / 1040;
+    const g = this.reviveGroup.getComponent(Graphics);
+    g.clear();
+    g.fillColor = new Color(30, 22, 27, 100);
+    g.rect(-this.visibleWidth / 2, -this.visibleHeight / 2, this.visibleWidth, this.visibleHeight); g.fill();
+    g.fillColor = this.rgb(CREAM_STYLE.panelColor);
+    g.roundRect(-width / 2, -height / 2, width, height, 40); g.fill();
+    this.layoutPanelLabel(this.reviveGroup, 'ReviveTitle', 0, 406 * scale, width - 64, 76 * scale, 48 * scale, true);
+    this.layoutPanelLabel(this.reviveGroup, 'ReviveHint', 0, 318 * scale, width - 64, 60 * scale, 24 * scale);
+    this.layoutPanelLabel(this.reviveGroup, 'ReviveStatus', 0, -248 * scale, width - 64, 108 * scale, 26 * scale);
+    this.reviveStatusLabel.enableWrapText = true;
+    this.layoutPanelButton(this.reviveCloseButton, 0, -408 * scale, width - 80, 100 * scale, 36 * scale);
+    this.drawOverlayButton(this.reviveCloseButton, width - 80, 100 * scale, true);
+    const size = Math.min(392 * scale, width - 96);
+    this.setCenteredNodeLayout(this.reviveQr.node, 0, 40 * scale);
+    this.reviveQr.node.getComponent(UITransform).setContentSize(size, size);
+    this.drawReviveQR();
+  }
+
+  private drawReviveQR(): void {
+    if (!this.reviveQr) return;
+    const g = this.reviveQr;
+    g.clear();
+    if (!this.reviveSession) return;
+    const { size, modules } = this.reviveSession;
+    const width = g.node.getComponent(UITransform).width;
+    const unit = width / (size + 8);
+    g.fillColor = Color.WHITE;
+    g.rect(-width / 2, -width / 2, width, width); g.fill();
+    g.fillColor = new Color(0, 0, 0, 255);
+    for (let row = 0; row < size; row++) for (let col = 0; col < size; col++) {
+      if (modules[row * size + col]) {
+        g.rect(-width / 2 + (col + 4) * unit, width / 2 - (row + 5) * unit, unit, unit);
+      }
+    }
+    g.fill();
+  }
+
+  private async openRevive(): Promise<void> {
+    if (this.phase !== 'gameover' || this.reviveUsed || this.homeTransition || this.reviveGroup?.active) return;
+    this.reviveClient ??= new ReviveClient();
+    const request = ++this.reviveRequest;
+    const round = this.roundId;
+    this.reviveGroup.active = true;
+    this.reviveStatusLabel.string = '正在生成二维码…';
+    this.layoutReviveUI();
+    try {
+      const session = await this.reviveClient.create();
+      if (!this.isValid || request !== this.reviveRequest || round !== this.roundId || !this.reviveGroup.active) {
+        void this.reviveClient.cancel(session).catch(() => {}); return;
+      }
+      this.reviveSession = session;
+      this.drawReviveQR();
+      this.reviveStatusLabel.string = '请用同一网络的手机扫码\n在手机上点击「确认复活」';
+      this.schedule(this.pollRevive, 1);
+    } catch (error) {
+      if (this.isValid && request === this.reviveRequest && this.reviveGroup.active) {
+        this.reviveStatusLabel.string = `${error.message}\n请返回结算后重试`;
+      }
+    }
+  }
+
+  private closeRevive(): void {
+    this.reviveRequest += 1;
+    this.unschedule(this.pollRevive);
+    if (this.reviveGroup) this.reviveGroup.active = false;
+    const session = this.reviveSession;
+    this.reviveSession = undefined;
+    this.drawReviveQR();
+    if (session && this.reviveClient) void this.reviveClient.cancel(session).catch(() => {});
+  }
+
+  private async pollRevive(): Promise<void> {
+    if (this.revivePolling || !this.reviveSession || !this.reviveGroup?.active) return;
+    const session = this.reviveSession;
+    const request = this.reviveRequest;
+    const round = this.roundId;
+    if (Date.now() >= session.expiresAt) {
+      this.unschedule(this.pollRevive);
+      this.reviveQr.clear();
+      this.reviveStatusLabel.string = '二维码已过期\n请返回结算后重新扫码'; return;
+    }
+    this.revivePolling = true;
+    try {
+      let result = await this.reviveClient.status(session);
+      if (request !== this.reviveRequest || round !== this.roundId || !this.isValid) return;
+      if (result.state === 'confirmed') result = await this.reviveClient.consume(session);
+      if (request !== this.reviveRequest || round !== this.roundId || !this.isValid
+        || this.phase !== 'gameover' || this.reviveUsed || !this.reviveGroup.active) return;
+      if (result.state === 'consumed') {
+        this.reviveUsed = true;
+        this.closeRevive();
+        this.beginScreenTransition(() => this.resumeRevivedRound(), 'game-start');
+      } else {
+        const seconds = Math.max(0, Math.ceil((session.expiresAt - Date.now()) / 1000));
+        this.reviveStatusLabel.string = `手机扫码后点击「确认复活」\n二维码 ${Math.floor(seconds / 60)}:${(`0${seconds % 60}`).slice(-2)} 后过期`;
+      }
+    } catch (error) {
+      if (this.isValid && request === this.reviveRequest && this.reviveGroup.active) {
+        this.reviveStatusLabel.string = `${error.message}\n正在重试，也可以返回结算`;
+      }
+    } finally { this.revivePolling = false; }
+  }
+
+  private resumeRevivedRound(): void {
+    // Keep lower layers and the round; restore the supporting top to half the initial footprint.
+    this.world3D.reset();
+    const top = this.stack[this.stack.length - 1];
+    top.width = BASE_SIZE * REVIVE_BLOCK_SCALE;
+    top.depth = BASE_SIZE * REVIVE_BLOCK_SCALE;
+    this.phase = 'playing';
+    this.phaseBeforePause = 'playing';
+    this.resultGroup.active = false;
+    this.pauseGroup.active = false;
+    this.gameplayHudGroup.active = true;
+    this.pauseButton.active = true;
+    this.submittedRoundId = '';
+    this.current = null;
+    this.fallingPieces = [];
+    this.sparks = []; this.rings = []; this.perfectFrames = [];
+    this.trauma = this.shakeTime = this.shakeX = this.shakeY = this.flashAlpha = 0;
+    this.spawnDelay = this.resultDelay = this.restartLock = 0;
+    this.resumeInputLock = 0.35;
+    this.resetPerfectChain(); this.resetPerfectFeedback();
+    this.updateWorldComposition(); this.updateTestModeUI();
+    this.spawnMovingBlock();
+    this.openingBlockEntering = true;
+    this.setScore(this.score, false);
+    this.drawFrame();
   }
 
   private buildHomeButtons(): void {
@@ -1107,16 +1005,15 @@ export class StackGame extends Component {
     if (!this.homeLeaderboardPreview) return;
     const layout = projectorLeaderboardPreviewLayout(this.visibleWidth, this.visibleHeight);
     const compact = layout.rowYs.length === 1;
-    const skin = this.currentSkin();
-    const text = skin.id === 'minimal-stack' ? this.rgb(skin.textColor) : this.textOnButton(skin.panelColor);
-    const soft = skin.id === 'minimal-stack';
+    const style = CREAM_STYLE;
+    const text = this.rgb(style.textColor);
     const g = this.homeLeaderboardPreviewGraphics;
     g.clear();
-    g.fillColor = this.rgb(skin.panelColor);
+    g.fillColor = this.rgb(style.panelColor);
     g.roundRect(-layout.panelWidth / 2, -layout.panelHeight / 2, layout.panelWidth, layout.panelHeight, compact ? 16 : 28);
     g.fill();
     g.lineWidth = 2;
-    g.strokeColor = soft ? new Color(255, 255, 249) : this.rgb(skin.accentColor);
+    g.strokeColor = new Color(255, 255, 249);
     g.roundRect(-layout.panelWidth / 2 + 2, -layout.panelHeight / 2 + 2,
       layout.panelWidth - 4, layout.panelHeight - 4, compact ? 14 : 26);
     g.stroke();
@@ -1141,9 +1038,9 @@ export class StackGame extends Component {
     this.homeLeaderboardPreviewSubtitle.node.active = !compact;
     place(this.homeLeaderboardPreviewSubtitle, layout.titleY - 43, 22, 30);
     if (!compact) {
-      g.fillColor = this.rgb(skin.accentColor);
+      g.fillColor = this.rgb(style.accentColor);
       g.roundRect(-24, layout.titleY + 33, 48, 4, 2); g.fill();
-      g.fillColor = soft ? new Color(220, 235, 222) : this.rgb(skin.buttonColor);
+      g.fillColor = new Color(220, 235, 222);
       g.roundRect(-layout.panelWidth / 2 + 24, layout.hintY - 24, layout.panelWidth - 48, 48, 18); g.fill();
     }
     this.homeLeaderboardPreviewRows.forEach((row, index) => {
@@ -1173,8 +1070,7 @@ export class StackGame extends Component {
       place(rank, y - 22, 17, 24); column(rank, -144, 24);
       rank.color = new Color(79, 62, 47);
       if (entry && !compact) {
-        g.fillColor = soft ? (index === 0 ? new Color(248, 232, 196) : new Color(246, 237, 224))
-          : new Color(text.r, text.g, text.b, index === 0 ? 22 : 12);
+        g.fillColor = (index === 0 ? new Color(248, 232, 196) : new Color(246, 237, 224));
         g.roundRect(-layout.panelWidth / 2 + 18, y - 46, layout.panelWidth - 36, 92, 20); g.fill();
         this.drawRankAvatar(g, -166, y + 4, 31, entry.score);
         this.drawRankNumberBadge(g, -144, y - 22, 12, index);
@@ -1193,7 +1089,7 @@ export class StackGame extends Component {
     }
     this.homeLeaderboardPreviewHint.node.active = !compact;
     place(this.homeLeaderboardPreviewHint, layout.hintY, layout.captionSize, 34);
-    if (!compact && !soft) this.homeLeaderboardPreviewHint.color = this.textOnButton(skin.buttonColor);
+
   }
 
   private async loadHomeLeaderboardPreview(): Promise<void> {
@@ -1228,36 +1124,10 @@ export class StackGame extends Component {
     this.buildTestModeToggle();
     this.nicknameButton = this.makeOverlayButton(this.settingsGroup, 'NicknameButton', '修改昵称', 500, 104, 0, -282);
     this.nicknameLabel = this.makeLabel('CurrentNickname', this.nicknameButton.node, this.playerNickname, 25, Color.WHITE, 360, 30);
+    this.restoreStaminaButton = this.makeOverlayButton(this.settingsGroup, 'RestoreStamina', '恢复体力 · 补满至 5 点', 500, 104, 0, -350);
     this.settingsCloseButton = this.makeOverlayButton(this.settingsGroup, 'SettingsClose', COPY.close, 400, 92, 0, -250);
     this.settingsGroup.active = false;
     this.buildNicknameEditor();
-
-    this.skinsGroup = this.makeFullNode('SkinsScreen', this.hudSafeRoot);
-    this.skinsGraphics = this.skinsGroup.addComponent(Graphics);
-    this.skinsGroup.addComponent(BlockInputEvents);
-    this.makeCenteredLabel('SkinsTitle', this.skinsGroup, COPY.skinTitle, 54, 545, 520, 86, new Color(255, 255, 255, 255));
-    this.skinsCoinLabel = this.makeCenteredLabel('SkinsCoins', this.skinsGroup, '', 28, 450, 420, 56, new Color(255, 245, 190, 255));
-    const cardPositions: readonly Point2[] = [
-      { x: 0, y: 305 },
-      { x: 0, y: 169 },
-      { x: 0, y: 33 },
-      { x: 0, y: -103 },
-      { x: 0, y: -239 },
-      { x: 0, y: -375 },
-    ];
-    SKIN_IDS.forEach((skinId, index) => {
-      const skin = SKINS[skinId];
-      const position = cardPositions[index];
-      this.skinCards.set(skinId, this.makeSkinCard(skin, position.x, position.y));
-      this.skinCardHandlers.set(skinId, () => {
-        this.skinSelection = index;
-        this.useOrBuySkin(skinId);
-      });
-    });
-    this.skinsHintLabel = this.makeCenteredLabel('SkinsHint', this.skinsGroup, COPY.skinHint, 20, -475, 520, 48, new Color(255, 255, 255, 170));
-    this.skinsHintLabel.node.active = false;
-    this.skinsCloseButton = this.makeOverlayButton(this.skinsGroup, 'SkinsClose', COPY.close, 420, 82, 0, -510);
-    this.skinsGroup.active = false;
 
     this.buildLeaderboardUI();
 
@@ -1266,7 +1136,6 @@ export class StackGame extends Component {
     this.transitionBlocker.active = false;
 
     this.updateSettingsUI();
-    this.updateSkinShopUI();
   }
 
   private buildLeaderboardUI(): void {
@@ -1329,10 +1198,9 @@ export class StackGame extends Component {
     if (!this.leaderboardGraphics) return;
     const layout = this.panelLayout('leaderboard');
     this.drawLeaderboardPanel();
-    const soft = this.currentSkin().id === 'minimal-stack';
-    const text = soft ? new Color(83, 67, 78) : new Color(240, 250, 249, 255);
-    const secondary = soft ? new Color(105, 86, 94) : new Color(181, 212, 217, 255);
-    const accent = soft ? new Color(87, 126, 113) : new Color(148, 232, 207, 255);
+    const text = this.rgb(CREAM_STYLE.textColor);
+    const secondary = new Color(105, 86, 94);
+    const accent = new Color(87, 126, 113);
     for (const name of ['LeaderboardTitle', 'LeaderboardStatus', 'LeaderboardRankHeading', 'LeaderboardColumns', 'LeaderboardScoreHeading', 'LeaderboardEmpty', 'LeaderboardScrollHint']) {
       this.setNamedLabelColor(this.leaderboardGroup, name, name === 'LeaderboardTitle' || name === 'LeaderboardEmpty'
         ? text : secondary);
@@ -1354,9 +1222,9 @@ export class StackGame extends Component {
       row.graphics.clear();
       this.drawLeaderboardGradient(row.graphics, -layout.rowWidth / 2, -layout.rowHeight / 2,
         layout.rowWidth, layout.rowHeight, 18,
-        soft ? (currentRound ? [227, 241, 226] : [255, 253, 243]) : currentRound ? [48, 99, 101] : [39, 83, 87],
-        soft ? (currentRound ? [213, 233, 218] : [246, 234, 220]) : [28, 65, 69]);
-      row.graphics.strokeColor = currentRound ? accent : soft ? new Color(169, 139, 133, 75) : new Color(112, 182, 179, 80);
+        (currentRound ? [227, 241, 226] : [255, 253, 243]),
+        (currentRound ? [213, 233, 218] : [246, 234, 220]));
+      row.graphics.strokeColor = currentRound ? accent : new Color(169, 139, 133, 75);
       row.graphics.lineWidth = currentRound ? 3 : 1;
       row.graphics.roundRect(-layout.rowWidth / 2, -layout.rowHeight / 2, layout.rowWidth, layout.rowHeight, 18);
       row.graphics.stroke();
@@ -1376,9 +1244,9 @@ export class StackGame extends Component {
       row.rank.color = new Color(56, 46, 31, 255);
       row.score.color = text;
       row.player.color = text;
-      row.title.color = soft ? new Color(120, 81, 42) : new Color(249, 222, 149, 255);
+      row.title.color = new Color(120, 81, 42);
       row.title.isBold = true;
-      row.detail.color = soft ? secondary : new Color(191, 216, 221, 255);
+      row.detail.color = secondary;
     });
     this.leaderboardEmpty.node.active = this.leaderboardLoading || this.leaderboardEntries.length === 0;
     this.leaderboardPageLabel.string = this.leaderboardLoading ? '' : this.leaderboardEntries.length > 4
@@ -1413,32 +1281,27 @@ export class StackGame extends Component {
   }
 
   private drawLeaderboardPanel(): void {
-    const soft = this.currentSkin().id === 'minimal-stack';
     const layout = this.panelLayout('leaderboard');
     const g = this.leaderboardGraphics;
     const w = layout.panelWidth;
     const h = layout.panelHeight;
     g.clear();
     for (const [inset, alpha] of [[14, 12], [7, 22], [0, 36]]) {
-      g.fillColor = soft ? new Color(133, 104, 106, alpha) : new Color(8, 42, 43, alpha);
+      g.fillColor = this.rgb(CREAM_STYLE.shadow, alpha);
       g.roundRect(-w / 2 - inset, -h / 2 - inset - 8, w + inset * 2, h + inset * 2, 44 + inset);
       g.fill();
     }
-    if (soft) {
-      g.fillColor = new Color(255, 248, 231);
-      g.roundRect(-w / 2, -h / 2, w, h, 44);
-      g.fill();
-    } else {
-      this.drawLeaderboardGradient(g, -w / 2, -h / 2, w, h, 44, [35, 85, 88], [16, 49, 54]);
-    }
-    g.strokeColor = soft ? new Color(255, 255, 245, 220) : new Color(111, 201, 191, 120);
+    g.fillColor = this.rgb(CREAM_STYLE.panelColor);
+    g.roundRect(-w / 2, -h / 2, w, h, 44);
+    g.fill();
+    g.strokeColor = new Color(255, 255, 245, 220);
     g.lineWidth = 2;
     g.roundRect(-w / 2, -h / 2, w, h, 44);
     g.stroke();
     g.strokeColor = new Color(174, 234, 220, 30);
     g.roundRect(-w / 2 + 5, -h / 2 + 5, w - 10, h - 10, 40);
     g.stroke();
-    g.fillColor = soft ? new Color(190, 157, 146, 32) : new Color(9, 38, 42, 96);
+    g.fillColor = new Color(190, 157, 146, 32);
     g.roundRect(-layout.contentWidth / 2 - 6, layout.listTop - layout.listHeight - 4,
       layout.contentWidth + 12, layout.listHeight + 80, 24);
     g.fill();
@@ -1554,7 +1417,7 @@ export class StackGame extends Component {
     g.fillColor = new Color(130, 189, 190, 90);
     g.roundRect(x, layout.listTop - layout.listHeight, 5, layout.listHeight, 2);
     g.fill();
-    g.fillColor = this.currentSkin().id === 'minimal-stack' ? new Color(87, 126, 113) : new Color(148, 232, 207, 255);
+    g.fillColor = new Color(87, 126, 113);
     g.roundRect(x, layout.listTop - height - progress * (layout.listHeight - height), 5, height, 2);
     g.fill();
   }
@@ -1629,6 +1492,7 @@ export class StackGame extends Component {
       id: this.roundId, score: this.score, perfectCount: this.roundPerfectCount,
       finishedAt: Date.now(), testMode: this.roundWasTest || this.testModeEnabled,
       nickname: this.roundNickname,
+      revived: this.reviveUsed,
     }).catch(() => { this.leaderboardSaveFailed = true; });
   }
 
@@ -1656,29 +1520,6 @@ export class StackGame extends Component {
     return ui;
   }
 
-  private makeSkinCard(skin: SkinDefinition, horizontalCenter: number, verticalCenter: number): SkinCardUI {
-    const node = this.makeNode(`SkinCard-${skin.id}`, this.skinsGroup);
-    node.addComponent(UITransform).setContentSize(SKIN_CARD_WIDTH + 16, SKIN_CARD_HEIGHT + 8);
-    this.anchorCenter(node, horizontalCenter, verticalCenter);
-    const graphics = node.addComponent(Graphics);
-    const button = node.addComponent(Button);
-    button.transition = Button.Transition.NONE;
-    const previewNode = this.makeNode(`SkinPreview-${skin.id}`, node);
-    previewNode.addComponent(UITransform).setContentSize(82, 74);
-    previewNode.setPosition(-205, 0, 0);
-    const previewSprite = previewNode.addComponent(Sprite);
-    previewSprite.sizeMode = Sprite.SizeMode.CUSTOM;
-    const title = this.makeLabel(`SkinTitle-${skin.id}`, node, skin.name, 25, new Color(255, 255, 255, 255), 250, 38);
-    title.horizontalAlign = Label.HorizontalAlign.LEFT;
-    title.node.setPosition(-15, 21, 0);
-    const description = this.makeLabel(`SkinDescription-${skin.id}`, node, skin.description, 16, new Color(255, 255, 255, 170), 270, 34);
-    description.horizontalAlign = Label.HorizontalAlign.LEFT;
-    description.node.setPosition(-5, -19, 0);
-    const status = this.makeLabel(`SkinStatus-${skin.id}`, node, '', 17, new Color(255, 255, 255, 245), 110, 44);
-    status.node.setPosition(195, 0, 0);
-    return { node, graphics, label: status, title, description, status, previewSprite };
-  }
-
   private drawHomeButton(
     graphics: Graphics,
     label: Label,
@@ -1686,21 +1527,21 @@ export class StackGame extends Component {
     height: number,
     selected = false,
   ): void {
-    const skin = this.currentSkin();
+    const style = CREAM_STYLE;
     graphics.clear();
     graphics.fillColor = selected
-      ? this.rgb(skin.accentColor)
-      : this.rgb(skin.buttonColor);
+      ? this.rgb(style.accentColor)
+      : this.rgb(style.buttonColor);
     graphics.roundRect(-width * 0.5, -height * 0.5, width, height, 28);
     graphics.fill();
-    graphics.strokeColor = this.rgb(skin.accentColor, selected ? 255 : 126);
+    graphics.strokeColor = this.rgb(style.accentColor, selected ? 255 : 126);
     graphics.lineWidth = selected ? 4 : 2;
     graphics.roundRect(-width * 0.5, -height * 0.5, width, height, 28);
     graphics.stroke();
     if (selected) this.drawHomeFocus(graphics, 0, width, height);
     label.color = selected
-      ? this.textOnButton(skin.accentColor)
-      : this.textOnButton(skin.buttonColor);
+      ? this.textOnButton(style.accentColor)
+      : this.textOnButton(style.buttonColor);
     const focusScale = selected && !this.reducedMotion ? 1.018 : 1;
     graphics.node.setScale(focusScale, focusScale, 1);
   }
@@ -1727,16 +1568,16 @@ export class StackGame extends Component {
       this.homeOverlay === 'none' && this.homeSelection === 2,
     );
     this.startPromptLabel.color = this.homeOverlay === 'none' && this.homeSelection === 0
-      ? this.textOnButton(this.currentSkin().accentColor)
-      : this.textOnButton(this.currentSkin().buttonColor);
+      ? this.textOnButton(CREAM_STYLE.accentColor)
+      : this.textOnButton(CREAM_STYLE.buttonColor);
   }
 
   private drawHomeFocus(graphics: Graphics, x: number, width: number, height: number): void {
-    graphics.strokeColor = this.textOnButton(this.currentSkin().panelColor);
+    graphics.strokeColor = this.textOnButton(CREAM_STYLE.panelColor);
     graphics.lineWidth = 4;
     graphics.roundRect(x - width / 2 - 8, -height / 2 - 8, width + 16, height + 16, 36);
     graphics.stroke();
-    graphics.fillColor = this.textOnButton(this.currentSkin().accentColor);
+    graphics.fillColor = this.textOnButton(CREAM_STYLE.accentColor);
     graphics.moveTo(x - width / 2 + 26, -10);
     graphics.lineTo(x - width / 2 + 39, 0);
     graphics.lineTo(x - width / 2 + 26, 10);
@@ -1745,16 +1586,16 @@ export class StackGame extends Component {
   }
 
   private drawOverlayBackdrop(graphics: Graphics, panelWidth: number, panelHeight: number): void {
-    const skin = this.currentSkin();
+    const style = CREAM_STYLE;
     const safeInset = this.tvLayout ? TV_OVERSCAN_INSET : 24;
     const effectiveWidth = Math.min(panelWidth, Math.max(0, this.visibleWidth - safeInset * 2));
     const effectiveHeight = Math.min(panelHeight, Math.max(0, this.visibleHeight - safeInset * 2));
     const panelX = this.panelCenterX(effectiveWidth);
     graphics.clear();
-    graphics.fillColor = this.rgb(skin.panelColor, 255);
+    graphics.fillColor = this.rgb(style.panelColor, 255);
     graphics.roundRect(panelX - effectiveWidth * 0.5, -effectiveHeight * 0.5, effectiveWidth, effectiveHeight, 42);
     graphics.fill();
-    graphics.strokeColor = this.rgb(skin.accentColor, 130);
+    graphics.strokeColor = this.rgb(style.accentColor, 130);
     graphics.lineWidth = 2;
     graphics.roundRect(panelX - effectiveWidth * 0.5, -effectiveHeight * 0.5, effectiveWidth, effectiveHeight, 42);
     graphics.stroke();
@@ -1832,11 +1673,11 @@ export class StackGame extends Component {
     const layout = this.panelLayout('settings');
     const width = Math.min(640, this.visibleWidth - 56);
     const content = width - 64;
-    const skin = this.currentSkin();
-    const text = this.textOnButton(skin.panelColor);
+    const style = CREAM_STYLE;
+    const text = this.textOnButton(style.panelColor);
     const g = this.nicknameGraphics;
     g.clear();
-    g.fillColor = this.rgb(skin.panelColor);
+    g.fillColor = this.rgb(style.panelColor);
     g.roundRect(-width / 2, -250, width, 500, 36);
     g.fill();
     this.layoutPanelLabel(this.nicknameGroup, 'NicknameTitle', 0, 176, content, 72, 52, true);
@@ -1960,73 +1801,8 @@ export class StackGame extends Component {
     this.nicknameLabel.color = this.nicknameButton.label.color;
     this.nicknameLabel.enableWrapText = false;
     this.setNamedLabelText(this.settingsGroup, 'SettingsHint', this.nicknameStatus || COPY.settingsHint);
-    this.drawOverlayButton(this.settingsCloseButton, layout.buttonWidth, layout.buttonHeight, this.homeOverlay === 'settings' && this.settingsSelection === 4, true);
-  }
-
-  private updateSkinShopUI(): void {
-    if (!this.skinsGraphics) {
-      return;
-    }
-    this.drawOverlayBackdrop(this.skinsGraphics, 620, 1240);
-    this.skinsCoinLabel.string = `${COPY.coins}  ${this.coins}`;
-    SKIN_IDS.forEach((skinId, index) => {
-      const card = this.skinCards.get(skinId);
-      if (card) {
-        this.drawSkinCard(card, SKINS[skinId], index);
-      }
-    });
-    this.drawOverlayButton(
-      this.skinsCloseButton,
-      420,
-      82,
-      this.homeOverlay === 'skins' && this.skinSelection === SKIN_IDS.length,
-      true,
-    );
-  }
-
-  private drawSkinCard(card: SkinCardUI, skin: SkinDefinition, index: number): void {
-    const current = this.currentSkin();
-    const panelText = this.textOnButton(current.panelColor);
-    const selected = this.selectedSkinId === skin.id;
-    const focused = this.homeOverlay === 'skins' && this.skinSelection === index;
-    const owned = this.ownedSkins.has(skin.id);
-    const g = card.graphics;
-    g.clear();
-    g.fillColor = focused
-      ? new Color(255, 255, 255, 232)
-      : new Color(255, 255, 255, selected ? 42 : 22);
-    g.roundRect(-SKIN_CARD_WIDTH * 0.5, -SKIN_CARD_HEIGHT * 0.5, SKIN_CARD_WIDTH, SKIN_CARD_HEIGHT, 28);
-    g.fill();
-    g.strokeColor = selected
-      ? this.rgb(current.accentColor, 230)
-      : new Color(panelText.r, panelText.g, panelText.b, focused ? 188 : 62);
-    g.lineWidth = selected ? 4 : focused ? 3 : 2;
-    g.roundRect(-SKIN_CARD_WIDTH * 0.5, -SKIN_CARD_HEIGHT * 0.5, SKIN_CARD_WIDTH, SKIN_CARD_HEIGHT, 28);
-    g.stroke();
-
-    card.previewSprite.spriteFrame = this.skinBackgrounds.get(skin.id) ?? null;
-
-    card.title.color = focused ? this.rgb(current.panelColor) : panelText;
-    card.description.color = focused
-      ? this.rgb(current.panelColor, 190)
-      : new Color(panelText.r, panelText.g, panelText.b, 170);
-    card.status.string = selected
-      ? COPY.equipped
-      : owned
-        ? COPY.equip
-        : this.coins >= skin.price
-          ? `${skin.price} ${COPY.unlock}`
-          : `还差 ${skin.price - this.coins} ${COPY.coins}`;
-    card.status.color = focused
-      ? this.rgb(current.panelColor)
-      : selected
-        ? this.rgb(current.accentColor)
-        : new Color(panelText.r, panelText.g, panelText.b, 238);
-    const fitScale = this.compactPortrait
-      ? Math.min(1, Math.max(0.86, (this.visibleWidth - 56) / SKIN_CARD_WIDTH))
-      : 1;
-    const scale = fitScale * (focused && !this.reducedMotion ? 1.018 : 1);
-    card.node.setScale(scale, scale, 1);
+    this.drawOverlayButton(this.restoreStaminaButton, layout.buttonWidth, layout.buttonHeight, this.homeOverlay === 'settings' && this.settingsSelection === 4);
+    this.drawOverlayButton(this.settingsCloseButton, layout.buttonWidth, layout.buttonHeight, this.homeOverlay === 'settings' && this.settingsSelection === 5, true);
   }
 
   private buildRecordGapHud(): void {
@@ -2043,15 +1819,15 @@ export class StackGame extends Component {
   }
 
   private drawGameplayHudCards(): void {
-    const skin = this.currentSkin();
-    const panelText = skin.id === 'minimal-stack' ? this.rgb(skin.textColor) : this.textOnButton(skin.panelColor);
+    const style = CREAM_STYLE;
+    const panelText = this.rgb(style.textColor);
     const layout = this.hudLayout();
     const drawCard = (graphics: Graphics): void => {
       graphics.clear();
-      graphics.fillColor = this.rgb(skin.panelColor);
+      graphics.fillColor = this.rgb(style.panelColor);
       graphics.roundRect(-layout.cardWidth / 2, -layout.cardHeight / 2, layout.cardWidth, layout.cardHeight, 24);
       graphics.fill();
-      graphics.strokeColor = this.rgb(skin.accentColor, 112);
+      graphics.strokeColor = this.rgb(style.accentColor, 112);
       graphics.lineWidth = 2;
       graphics.roundRect(-layout.cardWidth / 2, -layout.cardHeight / 2, layout.cardWidth, layout.cardHeight, 24);
       graphics.stroke();
@@ -2062,7 +1838,7 @@ export class StackGame extends Component {
     this.scoreLabel.color = this.bestLabel.color = panelText;
     const gap = this.recordGapGraphics;
     gap.clear();
-    gap.fillColor = this.rgb(skin.panelColor);
+    gap.fillColor = this.rgb(style.panelColor);
     gap.roundRect(-layout.recordGapWidth / 2, -layout.recordGapHeight / 2,
       layout.recordGapWidth, layout.recordGapHeight, 12);
     gap.fill();
@@ -2149,14 +1925,14 @@ export class StackGame extends Component {
   }
 
   private drawPauseHudButton(): void {
-    const skin = this.currentSkin();
+    const style = CREAM_STYLE;
     const layout = this.hudLayout();
     const g = this.pauseButtonGraphics;
     g.clear();
-    g.fillColor = this.rgb(skin.buttonColor);
+    g.fillColor = this.rgb(style.buttonColor);
     g.roundRect(-layout.pauseWidth / 2, -layout.pauseHeight / 2, layout.pauseWidth, layout.pauseHeight, 28);
     g.fill();
-    g.strokeColor = this.rgb(skin.accentColor, 118);
+    g.strokeColor = this.rgb(style.accentColor, 118);
     g.lineWidth = 2;
     g.roundRect(-layout.pauseWidth / 2, -layout.pauseHeight / 2, layout.pauseWidth, layout.pauseHeight, 28);
     g.stroke();
@@ -2205,6 +1981,7 @@ export class StackGame extends Component {
   }
 
   private showReadyScreen(): void {
+    this.closeRevive();
     this.phase = 'ready';
     this.updateWorldComposition();
     this.phaseBeforePause = 'playing';
@@ -2257,7 +2034,6 @@ export class StackGame extends Component {
     this.resultGroup.active = false;
     this.pauseGroup.active = false;
     this.settingsGroup.active = false;
-    this.skinsGroup.active = false;
     this.pauseButton.active = false;
     this.leaderboardGroup.active = false;
     this.gameplayHudGroup.active = false;
@@ -2265,20 +2041,31 @@ export class StackGame extends Component {
     this.updateBestLabel();
     this.updateCoinLabels();
     this.updateAudioPrompt();
-    this.applyThemeToUI();
+    this.updateStaminaUI();
+    this.applyCreamStyleToUI();
     void this.loadHomeLeaderboardPreview();
     this.drawFrame();
   }
 
   private startGame(): void {
-    if (this.homeTransition || !this.audioReady || this.homeOverlay !== 'none') {
+    if (this.reviveGroup?.active || this.homeTransition || !this.audioReady || this.homeOverlay !== 'none'
+      || ['ready', 'paused', 'gameover'].indexOf(this.phase) < 0) {
       this.updateAudioPrompt();
       return;
     }
+    this.stamina ??= new Stamina(sys.localStorage);
+    if (!this.testModeEnabled && !this.stamina.spend()) {
+      this.updateStaminaUI();
+      return;
+    }
+    this.updateStaminaUI();
     this.beginScreenTransition(() => this.startGameImmediately(), 'game-start');
   }
 
   private startGameImmediately(): void {
+    this.closeRevive();
+    this.reviveUsed = false;
+    this.roundRewardedPerfectCount = 0;
     Tween.stopAllByTarget(this.resultGroup);
     Tween.stopAllByTarget(this.pauseGroup);
     Tween.stopAllByTarget(this.scoreLabel.node);
@@ -2320,7 +2107,6 @@ export class StackGame extends Component {
     this.resultGroup.active = false;
     this.pauseGroup.active = false;
     this.settingsGroup.active = false;
-    this.skinsGroup.active = false;
     this.pauseGroup.setScale(1, 1, 1);
     this.leaderboardGroup.active = false;
     this.pauseButton.active = true;
@@ -2334,8 +2120,10 @@ export class StackGame extends Component {
   private spawnMovingBlock(): void {
     const previous = this.stack[this.stack.length - 1];
     const level = previous.level + 1;
+    this.openingBlockEntering = level === 1;
     this.moveAxis = level % 2 === 1 ? 'x' : 'z';
-    this.moveDirection = level % 4 < 2 ? 1 : -1;
+    // With the fixed camera, -X enters from upper left and -Z from upper right.
+    this.moveDirection = 1;
     const speedProgress = Math.max(0, this.score - MOVE_SPEED_WARMUP_SCORE);
     this.moveSpeed = Math.min(MAX_MOVE_SPEED, INITIAL_MOVE_SPEED + speedProgress * MOVE_SPEED_PER_SCORE);
 
@@ -2380,10 +2168,15 @@ export class StackGame extends Component {
     } else {
       this.current.z = resolved;
     }
+    const currentSize = this.moveAxis === 'x' ? this.current.width : this.current.depth;
+    const previousSize = this.moveAxis === 'x' ? previous.width : previous.depth;
+    if (Math.abs(resolved - center) < (currentSize + previousSize) * 0.5) {
+      this.openingBlockEntering = false;
+    }
   }
 
   private placeCurrentBlock(): void {
-    if (!this.current || this.spawnDelay > 0 || this.phase !== 'playing') {
+    if (!this.current || this.openingBlockEntering || this.spawnDelay > 0 || this.phase !== 'playing') {
       return;
     }
 
@@ -2574,7 +2367,7 @@ export class StackGame extends Component {
     this.phase = 'gameover';
     this.recordLeaderboardResult();
     this.updateWorldComposition();
-    this.resultSelection = 0;
+    this.resultSelection = this.reviveUsed ? 1 : 0;
     this.updateResultFocus();
     this.pauseButton.active = false;
     this.gameplayHudGroup.active = false;
@@ -2588,7 +2381,8 @@ export class StackGame extends Component {
       this.saveBestScore();
     }
 
-    this.lastEarnedCoins = this.testModeEnabled ? 0 : this.roundPerfectCount;
+    this.lastEarnedCoins = this.testModeEnabled ? 0 : Math.max(0, this.roundPerfectCount - (this.roundRewardedPerfectCount || 0));
+    this.roundRewardedPerfectCount = this.roundPerfectCount;
     if (this.lastEarnedCoins > 0) {
       this.coins += this.lastEarnedCoins;
       this.saveEconomy();
@@ -2841,9 +2635,6 @@ export class StackGame extends Component {
     const effects = this.effectsGraphics;
     g.clear();
     effects.clear();
-    this.backgroundNode.active = false;
-    this.homeTowerPreviewNode.active = false;
-    this.natureTextureRoot.active = false;
     this.world3D.sync(this.stack, this.current);
     this.drawEffects(effects);
     this.drawOverlay();
@@ -2852,344 +2643,6 @@ export class StackGame extends Component {
       effects.fillColor = new Color(255, 255, 255, Math.round(this.flashAlpha * 255));
       effects.rect(-this.visibleWidth * 0.5, -this.visibleHeight * 0.5, this.visibleWidth, this.visibleHeight);
       effects.fill();
-    }
-  }
-
-  private drawBackground(g: Graphics): void {
-    const skin = this.currentSkin();
-    g.fillColor = this.hslToColor(
-      skin.backgroundHue,
-      skin.backgroundSaturation,
-      skin.backgroundLightness,
-    );
-    g.rect(-this.visibleWidth * 0.5, -this.visibleHeight * 0.5, this.visibleWidth, this.visibleHeight);
-    g.fill();
-  }
-
-  private drawTowerShadow(g: Graphics): void {
-    const base = this.project(0, 0, 0);
-    const [red, green, blue] = this.currentSkin().shadow;
-    for (let index = 4; index >= 1; index -= 1) {
-      const scale = index / 4;
-      g.fillColor = new Color(red, green, blue, Math.round(9 + scale * 9));
-      g.ellipse(base.x, base.y - 78 + 16 * scale, 160 * scale, 38 * scale);
-      g.fill();
-    }
-  }
-
-  private drawGuidePlatform(g: Graphics): void {
-    const reference = this.stack.length > 0 ? this.stack[this.stack.length - 1] : null;
-    if (!reference) {
-      return;
-    }
-    const level = reference.level + 0.02;
-    const expansion = 0.55;
-    const outline: StackBlock = {
-      ...reference,
-      width: reference.width + expansion,
-      depth: reference.depth + expansion,
-      level,
-    };
-    const points = this.topPoints(outline);
-    g.strokeColor = this.rgb(this.currentSkin().accentColor, 42);
-    g.lineWidth = 1.2;
-    g.moveTo(points[0].x, points[0].y);
-    for (let index = 1; index < points.length; index += 1) {
-      g.lineTo(points[index].x, points[index].y);
-    }
-    g.close();
-    g.stroke();
-  }
-
-  private drawBlock(
-    g: Graphics,
-    block: StackBlock,
-    offsetY = 0,
-    rotation = 0,
-    opacity = 255,
-    offsetX = 0,
-  ): void {
-    if (block.width <= 0.01 || block.depth <= 0.01) {
-      return;
-    }
-
-    const { top, bottom } = this.blockFaceGeometry(block, offsetY, rotation, offsetX);
-    const skin = this.currentSkin();
-    const colors = this.blockColorsForSkin(skin, block.level, opacity, block.hue);
-
-    this.fillPolygon(g, [top[3], top[0], bottom[0], bottom[3]], colors.left);
-    this.fillPolygon(g, [top[0], top[1], bottom[1], bottom[0]], colors.right);
-    this.fillPolygon(g, top, colors.top);
-
-    g.strokeColor = colors.outline;
-    g.lineWidth = skin.visualStyle === 'cyber' ? 2.1 : 1.15;
-    g.moveTo(top[3].x, top[3].y);
-    g.lineTo(top[2].x, top[2].y);
-    g.lineTo(top[1].x, top[1].y);
-    g.stroke();
-
-    if (skin.visualStyle === 'porcelain') {
-      const leftMidA = this.midpoint(top[3], bottom[3]);
-      const leftMidB = this.midpoint(top[0], bottom[0]);
-      const rightMidA = this.midpoint(top[0], bottom[0]);
-      const rightMidB = this.midpoint(top[1], bottom[1]);
-      g.strokeColor = this.rgb(skin.secondaryAccentColor, Math.round(opacity * 0.76));
-      g.lineWidth = 4;
-      g.moveTo(leftMidA.x, leftMidA.y);
-      g.lineTo(leftMidB.x, leftMidB.y);
-      g.moveTo(rightMidA.x, rightMidA.y);
-      g.lineTo(rightMidB.x, rightMidB.y);
-      g.stroke();
-    } else if (skin.visualStyle === 'pastel') {
-      const faceCenter = this.quadCenter(top[3], top[0], bottom[0], bottom[3]);
-      const decoration = skin.blockPalette?.[(block.level + 2) % skin.blockPalette.length] ?? skin.secondaryAccentColor;
-      g.fillColor = this.rgb(decoration, Math.round(opacity * 0.85));
-      g.circle(faceCenter.x, faceCenter.y, 4.5);
-      g.fill();
-    }
-  }
-
-  private blockFaceGeometry(
-    block: StackBlock,
-    offsetY = 0,
-    rotation = 0,
-    offsetX = 0,
-  ): BlockFaceGeometry {
-    const rawTop = this.topPoints(block).map((point) => ({ x: point.x + offsetX, y: point.y + offsetY }));
-    const center = rawTop.reduce((acc, point) => ({ x: acc.x + point.x / 4, y: acc.y + point.y / 4 }), { x: 0, y: 0 });
-    const top = rotation === 0 ? rawTop : rawTop.map((point) => this.rotatePoint(point, center, rotation));
-    const down = (point: Point2): Point2 => {
-      const lowered = { x: point.x, y: point.y - BLOCK_HEIGHT };
-      return rotation === 0 ? lowered : this.rotatePoint(lowered, center, rotation);
-    };
-    const bottom = top.map((_, index) => down(rawTop[index]));
-    return { top, bottom };
-  }
-
-  private updateNatureTextureBlocks(renderedBlocks: readonly RenderedBlock[]): void {
-    const materialsReady = this.natureMaterialFrames.size === 3;
-    if (this.selectedSkinId !== 'nature-zen' || !materialsReady || renderedBlocks.length === 0) {
-      this.natureTextureRoot.active = false;
-      return;
-    }
-
-    this.natureTextureRoot.active = true;
-    const margin = 160;
-    const visibleBlocks = renderedBlocks.filter((rendered) => {
-      const { top, bottom } = this.blockFaceGeometry(
-        rendered.block,
-        rendered.offsetY,
-        rendered.rotation,
-        rendered.offsetX,
-      );
-      const points = [...top, ...bottom];
-      const minY = Math.min(...points.map((point) => point.y));
-      const maxY = Math.max(...points.map((point) => point.y));
-      return maxY >= -this.visibleHeight * 0.5 - margin
-        && minY <= this.visibleHeight * 0.5 + margin;
-    });
-
-    visibleBlocks.forEach((rendered, index) => {
-      const texturedBlock = this.ensureNatureTextureBlock(index);
-      texturedBlock.node.active = true;
-      const geometry = this.blockFaceGeometry(
-        rendered.block,
-        rendered.offsetY,
-        rendered.rotation,
-        rendered.offsetX,
-      );
-      const frame = this.natureMaterialFrames.get(this.natureMaterialForLevel(rendered.block.level));
-      if (!frame) {
-        texturedBlock.node.active = false;
-        return;
-      }
-
-      const alpha = Math.round(rendered.opacity);
-      this.configureNatureTextureFace(
-        texturedBlock.left,
-        [geometry.top[3], geometry.top[0], geometry.bottom[0], geometry.bottom[3]],
-        frame,
-        new Color(218, 220, 202, alpha),
-        rendered.rotation * 180 / Math.PI,
-      );
-      this.configureNatureTextureFace(
-        texturedBlock.right,
-        [geometry.top[0], geometry.top[1], geometry.bottom[1], geometry.bottom[0]],
-        frame,
-        new Color(194, 199, 181, alpha),
-        rendered.rotation * 180 / Math.PI,
-      );
-      this.configureNatureTextureFace(
-        texturedBlock.top,
-        geometry.top,
-        frame,
-        new Color(255, 249, 226, alpha),
-        Math.atan2(this.isoY, this.isoX) * 180 / Math.PI + rendered.rotation * 180 / Math.PI,
-        true,
-      );
-    });
-
-    for (let index = visibleBlocks.length; index < this.natureTextureBlocks.length; index += 1) {
-      this.natureTextureBlocks[index].node.active = false;
-    }
-  }
-
-  private ensureNatureTextureBlock(index: number): NatureTextureBlock {
-    const existing = this.natureTextureBlocks[index];
-    if (existing) {
-      return existing;
-    }
-
-    const node = this.makeNode(`NatureTextureBlock-${index}`, this.natureTextureRoot);
-    node.addComponent(UITransform).setContentSize(this.visibleWidth, this.visibleHeight);
-    const texturedBlock: NatureTextureBlock = {
-      node,
-      left: this.makeNatureTextureFace(node, 'Left'),
-      right: this.makeNatureTextureFace(node, 'Right'),
-      top: this.makeNatureTextureFace(node, 'Top'),
-    };
-    this.natureTextureBlocks.push(texturedBlock);
-    return texturedBlock;
-  }
-
-  private makeNatureTextureFace(parent: Node, name: string): NatureTextureFace {
-    const maskNode = this.makeNode(name, parent);
-    maskNode.addComponent(UITransform).setContentSize(this.visibleWidth, this.visibleHeight);
-    const mask = maskNode.addComponent(MaskComponent);
-    mask.type = MaskComponent.Type.GRAPHICS_STENCIL;
-    const maskGraphics = mask.subComp as Graphics;
-
-    const spriteNode = this.makeNode(`${name}Texture`, maskNode);
-    spriteNode.addComponent(UITransform).setContentSize(64, 64);
-    const sprite = spriteNode.addComponent(Sprite);
-    sprite.sizeMode = Sprite.SizeMode.CUSTOM;
-    sprite.type = Sprite.Type.SIMPLE;
-    return { maskNode, maskGraphics, spriteNode, sprite };
-  }
-
-  private configureNatureTextureFace(
-    face: NatureTextureFace,
-    points: readonly Point2[],
-    frame: SpriteFrame,
-    color: Color,
-    textureRotation: number,
-    squareCoverage = false,
-  ): void {
-    face.maskGraphics.clear();
-    face.maskGraphics.fillColor = Color.WHITE;
-    face.maskGraphics.moveTo(points[0].x, points[0].y);
-    for (let index = 1; index < points.length; index += 1) {
-      face.maskGraphics.lineTo(points[index].x, points[index].y);
-    }
-    face.maskGraphics.close();
-    face.maskGraphics.fill();
-
-    const minX = Math.min(...points.map((point) => point.x));
-    const maxX = Math.max(...points.map((point) => point.x));
-    const minY = Math.min(...points.map((point) => point.y));
-    const maxY = Math.max(...points.map((point) => point.y));
-    const width = Math.max(4, maxX - minX + 6);
-    const height = Math.max(4, maxY - minY + 6);
-    const coverage = squareCoverage ? Math.hypot(width, height) + 12 : 0;
-
-    face.sprite.spriteFrame = frame;
-    face.sprite.color = color;
-    face.spriteNode.getComponent(UITransform)?.setContentSize(
-      squareCoverage ? coverage : width,
-      squareCoverage ? coverage : height,
-    );
-    face.spriteNode.setPosition((minX + maxX) * 0.5, (minY + maxY) * 0.5, 0);
-    face.spriteNode.setRotationFromEuler(0, 0, textureRotation);
-  }
-
-  private natureMaterialForLevel(level: number): NatureMaterialId {
-    const sequence: readonly NatureMaterialId[] = [
-      'green-stone',
-      'light-wood',
-      'walnut',
-      'green-stone',
-      'light-wood',
-    ];
-    return sequence[Math.abs(level) % sequence.length];
-  }
-
-  private drawNatureTextureEdges(g: Graphics, renderedBlocks: readonly RenderedBlock[]): void {
-    if (!this.natureTextureRoot.active || renderedBlocks.length === 0) {
-      return;
-    }
-
-    g.lineJoin = Graphics.LineJoin.ROUND;
-    g.lineCap = Graphics.LineCap.ROUND;
-    for (const rendered of renderedBlocks) {
-      if (rendered.block.width <= 0.01 || rendered.block.depth <= 0.01) {
-        continue;
-      }
-      const { top, bottom } = this.blockFaceGeometry(
-        rendered.block,
-        rendered.offsetY,
-        rendered.rotation,
-        rendered.offsetX,
-      );
-      const alpha = Math.max(0, Math.min(255, rendered.opacity));
-
-      g.strokeColor = new Color(24, 37, 27, Math.round(alpha * 0.72));
-      g.lineWidth = 5.4;
-      g.moveTo(top[3].x, top[3].y);
-      g.lineTo(top[2].x, top[2].y);
-      g.lineTo(top[1].x, top[1].y);
-      g.lineTo(bottom[1].x, bottom[1].y);
-      g.lineTo(bottom[0].x, bottom[0].y);
-      g.lineTo(bottom[3].x, bottom[3].y);
-      g.close();
-      g.stroke();
-
-      g.strokeColor = new Color(210, 161, 68, Math.round(alpha * 0.92));
-      g.lineWidth = 2.4;
-      g.moveTo(top[3].x, top[3].y);
-      g.lineTo(top[2].x, top[2].y);
-      g.lineTo(top[1].x, top[1].y);
-      g.lineTo(top[0].x, top[0].y);
-      g.close();
-      g.moveTo(top[3].x, top[3].y);
-      g.lineTo(bottom[3].x, bottom[3].y);
-      g.lineTo(bottom[0].x, bottom[0].y);
-      g.lineTo(bottom[1].x, bottom[1].y);
-      g.lineTo(top[1].x, top[1].y);
-      g.stroke();
-
-      g.strokeColor = new Color(255, 236, 174, Math.round(alpha * 0.78));
-      g.lineWidth = 1.15;
-      g.moveTo(top[3].x, top[3].y);
-      g.lineTo(top[0].x, top[0].y);
-      g.lineTo(top[1].x, top[1].y);
-      g.stroke();
-    }
-
-    const emblemBlock = this.current ?? this.stack[this.stack.length - 1];
-    const emblemState = [...renderedBlocks].reverse().find((rendered) => (
-      rendered.block === emblemBlock
-      && rendered.rotation === 0
-      && rendered.opacity > 220
-    ));
-    if (emblemState) {
-      const { top } = this.blockFaceGeometry(
-        emblemState.block,
-        emblemState.offsetY,
-        emblemState.rotation,
-        emblemState.offsetX,
-      );
-      const center = this.quadCenter(top[0], top[1], top[2], top[3]);
-      const size = Math.max(7, Math.min(12, (emblemState.block.width + emblemState.block.depth) * 0.95));
-      g.fillColor = new Color(178, 124, 42, 232);
-      g.moveTo(center.x, center.y + size);
-      g.lineTo(center.x + size, center.y);
-      g.lineTo(center.x, center.y - size);
-      g.lineTo(center.x - size, center.y);
-      g.close();
-      g.fill();
-      g.strokeColor = new Color(255, 235, 167, 245);
-      g.lineWidth = 1.5;
-      g.stroke();
     }
   }
 
@@ -3278,7 +2731,7 @@ export class StackGame extends Component {
     this.resultPanelGraphics.clear();
     const g = this.phase === 'ready' ? this.homePanelGraphics
       : this.phase === 'paused' ? this.pausePanelGraphics : this.resultPanelGraphics;
-    const skin = this.currentSkin();
+    const style = CREAM_STYLE;
     // Overlay screens own their backdrop; the home panel must not show through.
     if (this.phase === 'ready' && this.homeOverlay !== 'none') {
       return;
@@ -3290,14 +2743,14 @@ export class StackGame extends Component {
       g.fillColor = new Color(0, 0, 0, 28);
       g.roundRect(homeX - panelWidth * 0.5 + 8, -panelHeight * 0.5 - 10, panelWidth, panelHeight, 44);
       g.fill();
-      g.fillColor = this.rgb(skin.panelColor);
+      g.fillColor = this.rgb(style.panelColor);
       g.roundRect(homeX - panelWidth * 0.5, -panelHeight * 0.5, panelWidth, panelHeight, 44);
       g.fill();
-      g.strokeColor = this.rgb(skin.accentColor, 96);
+      g.strokeColor = this.rgb(style.accentColor, 96);
       g.lineWidth = 2;
       g.roundRect(homeX - panelWidth * 0.5, -panelHeight * 0.5, panelWidth, panelHeight, 44);
       g.stroke();
-      g.fillColor = this.rgb(skin.accentColor);
+      g.fillColor = this.rgb(style.accentColor);
       g.roundRect(homeX - 28, panelHeight * 0.5 - 44, 56, 5, 2.5);
       g.fill();
     } else if (this.phase === 'paused') {
@@ -3371,9 +2824,25 @@ export class StackGame extends Component {
   private updateAudioPrompt(): void {
     if (this.startPromptLabel?.isValid) {
       this.startPromptLabel.string = this.audioReady
-        ? (this.wideLayout ? COPY.startRemote : COPY.start)
+        ? (!this.testModeEnabled && this.stamina?.snapshot().amount === 0 ? '体力不足，等待恢复'
+          : (this.wideLayout ? COPY.startRemote : COPY.start))
         : COPY.loadingAudio;
     }
+  }
+
+  private updateStaminaUI(): void {
+    if (!this.stamina) return;
+    const now = Date.now();
+    const { amount, nextAt } = this.stamina.snapshot(now);
+    const seconds = nextAt === null ? 0 : Math.max(0, Math.ceil((nextAt - now) / 1000));
+    const countdown = `${(`0${Math.floor(seconds / 60)}`).slice(-2)}:${(`0${seconds % 60}`).slice(-2)}`;
+    const text = this.testModeEnabled ? `体力 ${amount}/${STAMINA_CAP} · 测试不消耗`
+      : `体力 ${amount}/${STAMINA_CAP} · ${nextAt === null ? '已满'  : `${countdown} 后恢复`}`;
+    if (this.homeStaminaLabel && this.homeStaminaLabel.string !== text) this.homeStaminaLabel.string = text;
+    const restartText = !this.testModeEnabled && amount === 0 ? `体力不足 ${countdown}` : COPY.restartRound;
+    if (this.restartButtonLabel) this.restartButtonLabel.string = restartText;
+    if (this.resultRestartButton?.label) this.resultRestartButton.label.string = restartText;
+    this.updateAudioPrompt();
   }
 
   private playSound(name: string, volumeScale = 1): void {
@@ -3410,7 +2879,7 @@ export class StackGame extends Component {
   }
 
   private onPointerAction(): void {
-    if (this.homeOverlay !== 'none' || this.phase === 'ready') {
+    if (this.reviveGroup?.active || this.homeOverlay !== 'none' || this.phase === 'ready') {
       return;
     }
     this.tryPrimaryAction();
@@ -3446,8 +2915,6 @@ export class StackGame extends Component {
   }
 
   private openHomeOverlay(overlay: Exclude<HomeOverlay, 'none'>): void {
-    // Retain purchased themes and rendering assets without a public shop entry.
-    if (overlay === 'skins') return;
     if (this.homeTransition || this.phase !== 'ready' || this.homeOverlay !== 'none') {
       return;
     }
@@ -3455,13 +2922,12 @@ export class StackGame extends Component {
       overlay === 'leaderboard' ? 'leaderboard-open' : 'menu-open');
   }
 
-  private openHomeOverlayImmediately(overlay: Exclude<HomeOverlay, 'none' | 'skins'>): void {
+  private openHomeOverlayImmediately(overlay: Exclude<HomeOverlay, 'none'>): void {
     this.homeLeaderboardPreviewRequest += 1;
     this.homeOverlay = overlay;
     this.lastActionAt = Date.now();
     this.startGroup.active = false;
     this.settingsGroup.active = overlay === 'settings';
-    this.skinsGroup.active = false;
     this.leaderboardGroup.active = overlay === 'leaderboard';
 
     const group = overlay === 'settings' ? this.settingsGroup : this.leaderboardGroup;
@@ -3488,22 +2954,18 @@ export class StackGame extends Component {
 
   private closeHomeOverlayImmediately(): void {
     Tween.stopAllByTarget(this.settingsGroup);
-    Tween.stopAllByTarget(this.skinsGroup);
     Tween.stopAllByTarget(this.leaderboardGroup);
     this.leaderboardRequest += 1;
     this.leaderboardScroll?.stopAutoScroll();
     this.leaderboardGroup.active = false;
     this.leaderboardGroup.setScale(1, 1, 1);
     this.settingsGroup.active = false;
-    this.skinsGroup.active = false;
     this.settingsGroup.setScale(1, 1, 1);
-    this.skinsGroup.setScale(1, 1, 1);
     this.homeOverlay = 'none';
     this.startGroup.active = true;
     this.lastActionAt = Date.now();
     this.updateHomeMenuFocus();
     this.updateSettingsUI();
-    this.updateSkinShopUI();
     void this.loadHomeLeaderboardPreview();
   }
 
@@ -3528,33 +2990,6 @@ export class StackGame extends Component {
     this.updateSettingsUI();
   }
 
-  private useOrBuySkin(skinId: SkinId): void {
-    if (this.homeOverlay !== 'skins') {
-      return;
-    }
-    const skin = SKINS[skinId];
-    if (!this.ownedSkins.has(skinId)) {
-      if (this.coins < skin.price) {
-        this.skinsHintLabel.string = `金币不足，还差 ${skin.price - this.coins} 枚`;
-        this.updateSkinShopUI();
-        return;
-      }
-      this.coins -= skin.price;
-      this.ownedSkins.add(skinId);
-      this.skinsHintLabel.string = `已解锁「${skin.name}」`;
-    } else if (this.selectedSkinId === skinId) {
-      this.skinsHintLabel.string = `正在使用「${skin.name}」`;
-    } else {
-      this.skinsHintLabel.string = `已换上「${skin.name}」`;
-    }
-
-    this.selectedSkinId = skinId;
-    this.saveEconomy();
-    this.updateCoinLabels();
-    this.updateSkinShopUI();
-    this.refreshVisibleSkin();
-  }
-
   private moveHomeSelection(direction: number): void {
     this.homeSelection = (this.homeSelection + (direction > 0 ? 1 : -1) + 3) % 3;
     this.updateHomeMenuFocus();
@@ -3571,8 +3006,18 @@ export class StackGame extends Component {
     }
   }
 
+  private onRestoreStamina(): void {
+    if (this.homeOverlay !== 'settings') return;
+    this.stamina ??= new Stamina(sys.localStorage);
+    this.stamina.restore();
+    this.settingsSelection = 4;
+    this.nicknameStatus = '体力已恢复至 5/5 · 每 30 分钟恢复 1 点';
+    this.updateStaminaUI();
+    this.updateSettingsUI();
+  }
+
   private moveSettingsSelection(direction: number): void {
-    this.settingsSelection = (this.settingsSelection + (direction > 0 ? 1 : -1) + 5) % 5;
+    this.settingsSelection = (this.settingsSelection + (direction > 0 ? 1 : -1) + 6) % 6;
     this.updateSettingsUI();
   }
 
@@ -3585,24 +3030,8 @@ export class StackGame extends Component {
       this.toggleTestMode();
     } else if (this.settingsSelection === 3) {
       this.openNicknameEditor();
-    } else {
-      this.closeHomeOverlay();
-    }
-  }
-
-  private moveSkinSelection(horizontal: number, vertical: number): void {
-    const itemCount = SKIN_IDS.length + 1;
-    const direction = Math.abs(vertical) >= Math.abs(horizontal)
-      ? (vertical < 0 ? 1 : -1)
-      : (horizontal > 0 ? 1 : -1);
-    this.skinSelection = (this.skinSelection + direction + itemCount) % itemCount;
-    this.updateSkinShopUI();
-  }
-
-  private activateSkinSelection(): void {
-    const skinId = SKIN_IDS[this.skinSelection];
-    if (skinId) {
-      this.useOrBuySkin(skinId);
+    } else if (this.settingsSelection === 4) {
+      this.onRestoreStamina();
     } else {
       this.closeHomeOverlay();
     }
@@ -3755,8 +3184,7 @@ export class StackGame extends Component {
   }
 
   private homeDimmerAlpha(): number {
-    const style = this.currentSkin().visualStyle;
-    return style === 'pastel' || style === 'nature' ? 8 : 18;
+    return 18;
   }
 
   private screenDimmerAlpha(): number {
@@ -3817,13 +3245,25 @@ export class StackGame extends Component {
 
   private updateResultFocus(): void {
     const layout = this.panelLayout('result');
-    this.drawOverlayButton(this.resultRestartButton, layout.buttonWidth, layout.buttonHeight, this.resultSelection === 0);
-    this.drawOverlayButton(this.resultHomeButton, layout.buttonWidth, layout.buttonHeight, this.resultSelection === 1);
+    if (this.resultReviveButton) {
+      this.resultReviveButton.label.string = this.reviveUsed ? '本局已复活' : '扫码复活 · 免费';
+      this.drawOverlayButton(this.resultReviveButton, layout.buttonWidth, layout.buttonHeight, this.resultSelection === 0);
+    }
+    this.drawOverlayButton(this.resultRestartButton, layout.buttonWidth, layout.buttonHeight, this.resultSelection === 1);
+    this.drawOverlayButton(this.resultHomeButton, layout.buttonWidth, layout.buttonHeight, this.resultSelection === 2);
   }
 
   private activateResultSelection(): void {
-    if (this.resultSelection === 1) this.returnToHome();
-    else this.tryRestartAction();
+    if (this.resultSelection === 0) void this.openRevive();
+    else if (this.resultSelection === 1) this.tryRestartAction();
+    else this.returnToHome();
+  }
+
+  private moveResultSelection(direction: number): void {
+    const first = this.reviveUsed ? 1 : 0;
+    const count = 3 - first;
+    this.resultSelection = first + (this.resultSelection - first + direction + count) % count;
+    this.updateResultFocus();
   }
 
   private restartPausedGame(): void {
@@ -3918,11 +3358,16 @@ export class StackGame extends Component {
     // confirm cannot fall through to the freshly revealed round.
     if (this.homeTransition) return;
 
+    if (this.reviveGroup?.active) {
+      if (isBackKey || isConfirmKey) this.closeRevive();
+      return;
+    }
+
     if (this.phase === 'gameover') {
       if (isBackKey) this.returnToHome();
       else if (isMenuNavigation) {
-        this.resultSelection = 1 - this.resultSelection;
-        this.updateResultFocus();
+        this.moveResultSelection(keyCode === KeyCode.ARROW_UP || keyCode === KeyCode.ARROW_LEFT
+          || keyCode === KeyCode.KEY_W || keyCode === KeyCode.KEY_A ? -1 : 1);
       } else if (isConfirmKey) this.activateResultSelection();
       else if (keyCode === KeyCode.KEY_R) this.tryRestartAction();
       return;
@@ -3948,18 +3393,6 @@ export class StackGame extends Component {
           || keyCode === KeyCode.KEY_D
           || isConfirmKey) {
           this.activateSettingsSelection();
-        }
-      } else {
-        if (keyCode === KeyCode.ARROW_LEFT || keyCode === KeyCode.KEY_A) {
-          this.moveSkinSelection(-1, 0);
-        } else if (keyCode === KeyCode.ARROW_RIGHT || keyCode === KeyCode.KEY_D) {
-          this.moveSkinSelection(1, 0);
-        } else if (keyCode === KeyCode.ARROW_UP || keyCode === KeyCode.KEY_W) {
-          this.moveSkinSelection(0, 1);
-        } else if (keyCode === KeyCode.ARROW_DOWN || keyCode === KeyCode.KEY_S) {
-          this.moveSkinSelection(0, -1);
-        } else if (isConfirmKey) {
-          this.activateSkinSelection();
         }
       }
       return;
@@ -4046,11 +3479,15 @@ export class StackGame extends Component {
       return;
     }
     if (this.homeTransition) return;
+    if (this.reviveGroup?.active) {
+      if (eastJustPressed || optionsJustPressed || southJustPressed) this.closeRevive();
+      return;
+    }
     if (this.phase === 'gameover') {
       if (eastJustPressed) this.returnToHome();
       else if (menuAxisJustPressed) {
-        this.resultSelection = 1 - this.resultSelection;
-        this.updateResultFocus();
+        this.moveResultSelection(Math.abs(menuAxisY) >= Math.abs(menuAxisX)
+          ? (menuAxisY < 0 ? 1 : -1) : (menuAxisX > 0 ? 1 : -1));
       } else if (southJustPressed) this.activateResultSelection();
       return;
     }
@@ -4066,8 +3503,6 @@ export class StackGame extends Component {
           else if (Math.abs(menuAxisX) > 0.55) this.changeLeaderboardPage(menuAxisX > 0 ? 1 : -1);
         } else if (this.homeOverlay === 'settings' && Math.abs(menuAxisY) > 0.55) {
           this.moveSettingsSelection(menuAxisY > 0 ? -1 : 1);
-        } else if (this.homeOverlay === 'skins') {
-          this.moveSkinSelection(menuAxisX, menuAxisY);
         }
       }
       if (southJustPressed) {
@@ -4075,8 +3510,6 @@ export class StackGame extends Component {
           this.activateLeaderboardSelection();
         } else if (this.homeOverlay === 'settings') {
           this.activateSettingsSelection();
-        } else {
-          this.activateSkinSelection();
         }
       }
       return;
@@ -4126,6 +3559,7 @@ export class StackGame extends Component {
     this.resetPerfectChain();
     this.resetPerfectFeedback();
     this.updateTestModeUI();
+    this.updateStaminaUI();
 
     this.updateSettingsUI();
   }
@@ -4197,23 +3631,8 @@ export class StackGame extends Component {
     this.worldOriginY = -this.visibleHeight * 0.3;
 
     this.node.getComponent(UITransform)?.setContentSize(visible);
-    this.backgroundNode?.getComponent(UITransform)?.setContentSize(visible);
     this.graphics?.node.getComponent(UITransform)?.setContentSize(visible);
     this.effectsGraphics?.node.getComponent(UITransform)?.setContentSize(visible);
-    this.natureTextureRoot?.getComponent(UITransform)?.setContentSize(visible);
-    for (const texturedBlock of this.natureTextureBlocks) {
-      texturedBlock.node.getComponent(UITransform)?.setContentSize(visible);
-      texturedBlock.left.maskNode.getComponent(UITransform)?.setContentSize(visible);
-      texturedBlock.right.maskNode.getComponent(UITransform)?.setContentSize(visible);
-      texturedBlock.top.maskNode.getComponent(UITransform)?.setContentSize(visible);
-    }
-    const towerWidth = Math.min(405, this.visibleWidth * 0.54);
-    this.homeTowerPreviewNode?.getComponent(UITransform)?.setContentSize(towerWidth, towerWidth * 768 / 734);
-    this.homeTowerPreviewNode?.setPosition(
-      this.wideLayout ? -WIDE_PANEL_CENTER_X * 0.86 : 0,
-      -this.visibleHeight * 0.215,
-      0,
-    );
     this.hudSafeRoot?.getComponent(UITransform)?.setContentSize(visible);
     this.hudSafeRoot?.getComponent(SafeArea)?.updateArea();
     this.applyResponsiveLayout();
@@ -4221,10 +3640,8 @@ export class StackGame extends Component {
 
     this.controlsLabel.node.active = true;
     this.precisionTipLabel.node.active = false;
-    this.skinsCloseButton.label.fontSize = this.tvLayout ? 32 : 30;
-    this.skinsCloseButton.label.lineHeight = Math.round(this.skinsCloseButton.label.fontSize * 1.2);
     this.updateAudioPrompt();
-    this.applyThemeToUI();
+    this.applyCreamStyleToUI();
     if (this.phase === 'paused') {
       this.drawFrame();
     }
@@ -4243,6 +3660,15 @@ export class StackGame extends Component {
   }
 
   private loadSettings(): void {
+    // Retired appearance choices must never affect the fixed cream style.
+    // Clean each key independently so unavailable storage cannot reset progress.
+    for (const key of ['wxstack-selected-skin', 'wxstack-owned-skins']) {
+      try {
+        sys.localStorage.removeItem(key);
+      } catch {
+        // The old value is ignored even when it cannot be removed.
+      }
+    }
     this.playerNickname = loadNickname(sys.localStorage);
     try {
       const storedBest = Number.parseInt(sys.localStorage.getItem(BEST_SCORE_STORAGE_KEY) || '0', 10);
@@ -4258,27 +3684,6 @@ export class StackGame extends Component {
         sys.localStorage.setItem(INITIAL_COIN_GRANT_STORAGE_KEY, '1');
       }
 
-      this.ownedSkins = new Set<SkinId>(FREE_SKIN_IDS);
-      const ownedRaw = sys.localStorage.getItem(OWNED_SKINS_STORAGE_KEY);
-      if (ownedRaw) {
-        const owned = JSON.parse(ownedRaw) as unknown;
-        if (Array.isArray(owned)) {
-          for (const skinId of owned) {
-            if (skinId === 'sunset') {
-              this.ownedSkins.add('cyber-neon');
-            } else if (typeof skinId === 'string' && (SKIN_IDS as readonly string[]).indexOf(skinId) >= 0) {
-              this.ownedSkins.add(skinId as SkinId);
-            }
-          }
-        }
-      }
-      const selected = sys.localStorage.getItem(SELECTED_SKIN_STORAGE_KEY);
-      const migratedSelected = selected === 'sunset' ? 'cyber-neon' : selected;
-      this.selectedSkinId = typeof migratedSelected === 'string'
-        && (SKIN_IDS as readonly string[]).indexOf(migratedSelected) >= 0
-        && this.ownedSkins.has(migratedSelected as SkinId)
-        ? migratedSelected as SkinId
-        : DEFAULT_SKIN_ID;
       this.soundEnabled = sys.localStorage.getItem(SOUND_STORAGE_KEY) !== '0';
 
       const prefersReducedMotion = sys.isBrowser
@@ -4290,8 +3695,6 @@ export class StackGame extends Component {
     } catch {
       this.bestScore = 0;
       this.coins = INITIAL_COINS;
-      this.ownedSkins = new Set<SkinId>(FREE_SKIN_IDS);
-      this.selectedSkinId = DEFAULT_SKIN_ID;
       this.soundEnabled = true;
       this.reducedMotion = false;
     }
@@ -4308,8 +3711,6 @@ export class StackGame extends Component {
   private saveEconomy(): void {
     try {
       sys.localStorage.setItem(COIN_STORAGE_KEY, `${this.coins}`);
-      sys.localStorage.setItem(OWNED_SKINS_STORAGE_KEY, JSON.stringify(Array.from(this.ownedSkins)));
-      sys.localStorage.setItem(SELECTED_SKIN_STORAGE_KEY, this.selectedSkinId);
     } catch {
       // Keep the current session playable when persistent storage is unavailable.
     }
@@ -4335,36 +3736,6 @@ export class StackGame extends Component {
     if (this.homeCoinLabel?.isValid) {
       this.homeCoinLabel.string = `${this.coins}`;
     }
-    if (this.skinsCoinLabel?.isValid) {
-      this.skinsCoinLabel.string = `${COPY.coins}  ${this.coins}`;
-    }
-  }
-
-  private currentSkin(): SkinDefinition {
-    return SKINS[this.selectedSkinId];
-  }
-
-  private loadThemeBackgrounds(): void {
-    for (const skinId of SKIN_IDS) {
-      resources.load(`skins/${SKINS[skinId].backgroundResource ?? skinId}/spriteFrame`, SpriteFrame, (error, frame) => {
-        if (error || !frame) {
-          if (this.selectedSkinId === skinId) {
-            this.notifyBrowserReady();
-          }
-          return;
-        }
-        this.skinBackgrounds.set(skinId, frame);
-        const card = this.skinCards.get(skinId);
-        if (card?.previewSprite.isValid) {
-          card.previewSprite.spriteFrame = frame;
-        }
-        if (this.selectedSkinId === skinId) {
-          this.applyThemeBackground();
-          this.drawFrame();
-          this.notifyBrowserReady();
-        }
-      });
-    }
   }
 
   private notifyBrowserReady(): void {
@@ -4372,8 +3743,8 @@ export class StackGame extends Component {
       return;
     }
     this.browserReadyNotified = true;
-    // Resource callbacks precede rendering. Keep the cover through a complete
-    // themed frame, including first-use material preparation.
+    // All cream visuals are created synchronously. Keep the cover through two
+    // rendered frames, including first-use material preparation.
     director.once(Director.EVENT_AFTER_DRAW, () => {
       director.once(Director.EVENT_AFTER_DRAW, () => {
         if (this.isValid) window.dispatchEvent(new Event('stack-game-ready'));
@@ -4381,191 +3752,22 @@ export class StackGame extends Component {
     });
   }
 
-  private loadBlockVisualAssets(): void {
-    for (const skinId of SKIN_IDS) {
-      const name = SKINS[skinId].blockAtlasResource;
-      resources.load(`skins/${name}/spriteFrame`, SpriteFrame, (error, frame) => {
-        if (error || !frame || !this.isValid) return;
-        this.blockAtlases.set(skinId, frame);
-        if (this.selectedSkinId === skinId) {
-          this.applyWorld3DTheme();
-          this.drawFrame();
-        }
-      });
-    }
-    resources.load('skins/nature-zen-tower/spriteFrame', SpriteFrame, (error, frame) => {
-      if (error || !frame) {
-        return;
-      }
-      this.homeTowerPreviewSprite.spriteFrame = frame;
-      this.drawFrame();
-    });
-
-    const materials: readonly NatureMaterialId[] = ['light-wood', 'green-stone', 'walnut'];
-    for (const material of materials) {
-      resources.load(
-        `skins/nature-zen-materials/${material}/spriteFrame`,
-        SpriteFrame,
-        (error, frame) => {
-          if (error || !frame) {
-            return;
-          }
-          this.natureMaterialFrames.set(material, frame);
-          if (this.selectedSkinId === 'nature-zen') {
-            this.applyWorld3DTheme();
-          }
-          this.drawFrame();
-        },
-      );
-    }
-  }
-
-  private applyThemeBackground(): void {
-    if (!this.backgroundSprite?.isValid) {
-      return;
-    }
-    this.backgroundSprite.spriteFrame = this.selectedSkinId === 'minimal-stack'
-      ? null : this.skinBackgrounds.get(this.selectedSkinId) ?? null;
-    this.applyWorld3DTheme();
-  }
-
-  private applyWorld3DTheme(): void {
-    if (!this.world3D) {
-      return;
-    }
-    const skin = this.currentSkin();
-    const softToy = skin.id === 'minimal-stack';
-    const blockColors = Array.from({ length: softToy ? 8 : 12 }, (_, level) => (
-      this.blockColorsForSkin(skin, level, 255, this.hueForLevel(level)).top
-    ));
-    const materialTextures = skin.visualStyle === 'nature'
-      ? [
-        this.natureMaterialFrames.get('green-stone'),
-        this.natureMaterialFrames.get('light-wood'),
-        this.natureMaterialFrames.get('walnut'),
-        this.natureMaterialFrames.get('green-stone'),
-        this.natureMaterialFrames.get('light-wood'),
-      ].filter((frame): frame is SpriteFrame => !!frame)
-      : [];
-    const theme: StackWorldTheme = {
-      background: softToy ? null : this.skinBackgrounds.get(this.selectedSkinId) ?? null,
-      backgroundColor: softToy ? new Color(210, 188, 181) : undefined,
-      softToy,
-      blockColors,
-      materialTextures,
-      blockAtlas: softToy ? null : this.blockAtlases.get(this.selectedSkinId) ?? null,
-      blockAtlasOrder: skin.blockAtlasOrder,
-      tintAtlas: skin.visualStyle === 'minimal',
-      sharpEdges: false,
-      outlineColor: skin.visualStyle === 'cyber' ? new Color(166, 245, 255, 255) : undefined,
-      accentColor: this.rgb(skin.accentColor),
-      roughness: skin.visualStyle === 'cyber' ? 0.3 : skin.visualStyle === 'porcelain' ? 0.4 : 0.68,
-      metallic: skin.visualStyle === 'cyber' ? 0.34 : skin.visualStyle === 'porcelain' ? 0.12 : 0.03,
-    };
-    this.world3D.setTheme(theme);
-  }
-
-  private refreshVisibleSkin(): void {
-    for (const block of this.stack) {
-      block.hue = this.hueForLevel(block.level);
-    }
-    if (this.current) {
-      this.current.hue = this.hueForLevel(this.current.level);
-    }
-    for (const piece of this.fallingPieces) {
-      piece.hue = this.hueForLevel(piece.level);
-    }
-    this.applyThemeBackground();
-    this.applyThemeToUI();
-    this.drawFrame();
-  }
-
   private hueForLevel(level: number): number {
-    const skin = this.currentSkin();
-    return (skin.blockHue + level * skin.blockHueStep) % 360;
+    return (166 + level * 5) % 360;
   }
 
-  private minimalLayerColor(level: number): RGB {
-    // A discrete pastel rainbow makes each successful layer easy to count.
-    const stops: readonly RGB[] = [
-      [153, 199, 199], [179, 211, 178], [222, 217, 153], [236, 200, 161],
-      [225, 175, 180], [197, 177, 208], [175, 185, 214], [161, 203, 214],
-    ];
-    return stops[Math.floor(Math.abs(level)) % stops.length];
-  }
-
-  private blockColorsForSkin(
-    skin: SkinDefinition,
-    level: number,
-    opacity: number,
-    hueOverride?: number,
-  ): { top: Color; left: Color; right: Color; outline: Color } {
-    const paletteColor = skin.visualStyle === 'minimal'
-      ? this.minimalLayerColor(level)
-      : skin.blockPalette?.[Math.abs(level) % skin.blockPalette.length];
-    const top = paletteColor
-      ? this.rgb(paletteColor, opacity)
-      : this.hslToColor(
-        hueOverride ?? skin.blockHue + level * skin.blockHueStep,
-        skin.blockSaturation,
-        skin.blockLightness,
-        opacity,
-      );
-
-    if (skin.visualStyle === 'porcelain') {
-      return {
-        top,
-        left: new Color(43, 88, 145, Math.round(opacity)),
-        right: new Color(24, 57, 108, Math.round(opacity)),
-        outline: this.rgb(skin.accentColor, Math.round(opacity * 0.92)),
-      };
-    }
-    if (skin.visualStyle === 'cyber') {
-      return {
-        top,
-        left: this.shade(top, 0.48, opacity),
-        right: this.shade(top, 0.3, opacity),
-        outline: this.rgb(skin.accentColor, Math.round(opacity * 0.88)),
-      };
-    }
-    if (skin.visualStyle === 'pastel' || skin.visualStyle === 'minimal') {
-      return {
-        top,
-        left: this.shade(top, 0.82, opacity),
-        right: this.shade(top, 0.7, opacity),
-        outline: new Color(255, 255, 255, Math.round(opacity * 0.5)),
-      };
-    }
-    if (skin.visualStyle === 'nature') {
-      return {
-        top,
-        left: this.shade(top, 0.64, opacity),
-        right: this.shade(top, 0.48, opacity),
-        outline: this.rgb(skin.accentColor, Math.round(opacity * 0.68)),
-      };
-    }
-    return {
-      top,
-      left: this.shade(top, 0.74, opacity),
-      right: this.shade(top, 0.58, opacity),
-      outline: new Color(255, 255, 255, Math.round(opacity * 0.28)),
-    };
-  }
-
-  private applyThemeToUI(): void {
+  private applyCreamStyleToUI(): void {
     if (!this.startGroup?.isValid) {
       return;
     }
-    const skin = this.currentSkin();
-    const title = this.rgb(skin.titleColor);
-    const text = this.rgb(skin.textColor);
-    const muted = this.rgb(skin.mutedColor);
-    const panelText = skin.id === 'minimal-stack' ? text : this.textOnButton(skin.panelColor);
+    const style = CREAM_STYLE;
+    const text = this.rgb(style.textColor);
+    const panelText = text;
 
     this.setNamedLabelColor(this.startGroup, 'Title', panelText);
     this.setNamedLabelColor(this.startGroup, 'Eyebrow', panelText);
     this.setNamedLabelColor(this.startGroup, 'Subtitle', panelText);
-    this.startPromptLabel.color = this.textOnButton(skin.buttonColor);
+    this.startPromptLabel.color = this.textOnButton(style.buttonColor);
     this.controlsLabel.color = panelText;
     this.precisionTipLabel.color = panelText;
     this.homeCoinLabel.color = panelText;
@@ -4579,13 +3781,13 @@ export class StackGame extends Component {
       badge.fillColor = new Color(panelText.r, panelText.g, panelText.b, 16);
       badge.roundRect(x - home.statWidth / 2, -home.statsHeight / 2, home.statWidth, home.statsHeight, 22);
       badge.fill();
-      badge.strokeColor = this.rgb(skin.accentColor, 80);
+      badge.strokeColor = this.rgb(style.accentColor, 80);
       badge.lineWidth = 1.5;
       badge.roundRect(x - home.statWidth / 2, -home.statsHeight / 2, home.statWidth, home.statsHeight, 22);
       badge.stroke();
     }
     this.testModeBadgeLabel.color = text;
-    this.perfectLabel.color = skin.id === 'minimal-stack' ? new Color(114, 66, 84) : this.rgb(skin.accentColor);
+    this.perfectLabel.color = new Color(114, 66, 84);
 
     this.resultTitleLabel.color = panelText;
     this.resultScoreLabel.color = panelText;
@@ -4593,23 +3795,19 @@ export class StackGame extends Component {
     this.resultCoinLabel.color = panelText;
     this.setNamedLabelColor(this.resultGroup, 'Restart', new Color(panelText.r, panelText.g, panelText.b, 235));
 
-    this.pauseButtonLabel.color = this.textOnButton(skin.buttonColor);
+    this.pauseButtonLabel.color = this.textOnButton(style.buttonColor);
     this.setNamedLabelColor(this.pauseGroup, 'PauseTitle', panelText);
     this.setNamedLabelColor(this.pauseGroup, 'PauseHint', new Color(panelText.r, panelText.g, panelText.b, 225));
     this.setNamedLabelColor(this.pauseGroup, 'PauseControls', new Color(panelText.r, panelText.g, panelText.b, 225));
 
     this.setNamedLabelColor(this.settingsGroup, 'SettingsTitle', panelText);
     this.setNamedLabelColor(this.settingsGroup, 'SettingsHint', new Color(panelText.r, panelText.g, panelText.b, 225));
-    this.setNamedLabelColor(this.skinsGroup, 'SkinsTitle', panelText);
-    this.skinsCoinLabel.color = this.rgb(skin.accentColor);
-    this.skinsHintLabel.color = new Color(panelText.r, panelText.g, panelText.b, 176);
 
     this.updateHomeMenuFocus();
     this.drawGameplayHudCards();
     this.updateTestModeUI();
     this.updatePauseMenuFocus();
     this.updateSettingsUI();
-    this.updateSkinShopUI();
     this.updateResultFocus();
     this.updateLeaderboardUI();
     this.updateHomeLeaderboardPreviewUI();
@@ -4640,14 +3838,6 @@ export class StackGame extends Component {
     return luminance > 0.179 ? new Color(0, 0, 0, 255) : new Color(255, 255, 255, 255);
   }
 
-  private midpoint(a: Point2, b: Point2): Point2 {
-    return { x: (a.x + b.x) * 0.5, y: (a.y + b.y) * 0.5 };
-  }
-
-  private quadCenter(a: Point2, b: Point2, c: Point2, d: Point2): Point2 {
-    return { x: (a.x + b.x + c.x + d.x) * 0.25, y: (a.y + b.y + c.y + d.y) * 0.25 };
-  }
-
   private lerpPoint(a: Point2, b: Point2, t: number): Point2 {
     return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
   }
@@ -4675,15 +3865,6 @@ export class StackGame extends Component {
       Math.round(channel(1 / 3) * 255),
       Math.round(channel(0) * 255),
       Math.round(channel(-1 / 3) * 255),
-      Math.round(alpha),
-    );
-  }
-
-  private shade(color: Color, factor: number, alpha = color.a): Color {
-    return new Color(
-      Math.round(color.r * factor),
-      Math.round(color.g * factor),
-      Math.round(color.b * factor),
       Math.round(alpha),
     );
   }
@@ -4834,6 +4015,11 @@ export class StackGame extends Component {
       title.isBold = true;
     }
     if (subtitle) place(subtitle, x, layout.subtitleY, width, 56, layout.split ? 36 : 28);
+    if (this.homeStaminaLabel) {
+      const gapTop = layout.statsY - layout.statsHeight / 2;
+      const gapBottom = layout.startY + layout.buttonHeight / 2;
+      place(this.homeStaminaLabel, x, (gapTop + gapBottom) / 2, width, gapTop - gapBottom, layout.split ? 26 : 23);
+    }
     if (eyebrow) place(eyebrow, x, layout.panelHeight / 2 - 76, width, 42, layout.split ? 30 : 25);
     this.setCenteredNodeLayout(this.homeBestBadge, x, layout.statsY);
     this.homeBestBadge.getComponent(UITransform)?.setContentSize(layout.buttonWidth, layout.statsHeight);
@@ -4874,19 +4060,19 @@ export class StackGame extends Component {
 
   private drawProjectorPanel(g: Graphics, layout: ReturnType<typeof projectorPanelLayout>): void {
     const { panelX: x, panelWidth: width, panelHeight: height } = layout;
-    const skin = this.currentSkin();
+    const style = CREAM_STYLE;
     g.clear();
     g.fillColor = new Color(0, 0, 0, 28);
     g.roundRect(x - width / 2 + 8, -height / 2 - 10, width, height, 44);
     g.fill();
-    g.fillColor = this.rgb(skin.panelColor);
+    g.fillColor = this.rgb(style.panelColor);
     g.roundRect(x - width / 2, -height / 2, width, height, 44);
     g.fill();
-    g.strokeColor = this.rgb(skin.accentColor, 96);
+    g.strokeColor = this.rgb(style.accentColor, 96);
     g.lineWidth = 2;
     g.roundRect(x - width / 2, -height / 2, width, height, 44);
     g.stroke();
-    g.fillColor = this.rgb(skin.accentColor);
+    g.fillColor = this.rgb(style.accentColor);
     g.roundRect(x - 28, height / 2 - 44, 56, 5, 2.5);
     g.fill();
   }
@@ -4945,12 +4131,12 @@ export class StackGame extends Component {
 
     for (const [kind, group, title, hint, buttons] of [
       ['settings', this.settingsGroup, 'SettingsTitle', 'SettingsHint', [this.soundToggle, this.motionToggle,
-        { node: this.testModeToggle, graphics: this.testModeToggleGraphics, label: this.testModeToggleLabel }, this.nicknameButton, this.settingsCloseButton]],
+        { node: this.testModeToggle, graphics: this.testModeToggleGraphics, label: this.testModeToggleLabel }, this.nicknameButton, this.restoreStaminaButton, this.settingsCloseButton]],
       ['pause', this.pauseGroup, 'PauseTitle', 'PauseHint', [
         { node: this.resumeButton, graphics: this.resumeButtonGraphics, label: this.resumeButtonLabel },
         { node: this.restartButton, graphics: this.restartButtonGraphics, label: this.restartButtonLabel },
         { node: this.homeButton, graphics: this.homeButtonGraphics, label: this.homeButtonLabel }]],
-      ['result', this.resultGroup, 'ResultTitle', '', [this.resultRestartButton, this.resultHomeButton]],
+      ['result', this.resultGroup, 'ResultTitle', '', [this.resultReviveButton, this.resultRestartButton, this.resultHomeButton].filter(Boolean)],
       ['leaderboard', this.leaderboardGroup, 'LeaderboardTitle', 'LeaderboardStatus', []],
     ] as ['settings' | 'pause' | 'result' | 'leaderboard', Node, string, string, ButtonUI[]][]) {
       const layout = this.panelLayout(kind);
@@ -4997,21 +4183,9 @@ export class StackGame extends Component {
   }
 
   private applyResponsiveLayout(): void {
-    const panelX = this.panelCenterX();
     this.applyHomeLayout();
     this.applyProjectorLayout();
-
-    this.setCenteredLayout(this.skinsGroup, 'SkinsTitle', panelX, 545);
-    this.setCenteredLayout(this.skinsGroup, 'SkinsCoins', panelX, 450);
-    SKIN_IDS.forEach((skinId, index) => {
-      const card = this.skinCards.get(skinId);
-      if (card) {
-        this.setCenteredNodeLayout(card.node, panelX, 305 - index * 136);
-      }
-    });
-    this.setCenteredLayout(this.skinsGroup, 'SkinsHint', panelX, -475);
-    this.setCenteredNodeLayout(this.skinsCloseButton.node, panelX, -510);
-
+    this.layoutReviveUI();
   }
 
   private updateWorldComposition(): void {

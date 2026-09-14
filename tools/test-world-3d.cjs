@@ -75,7 +75,7 @@ class Node {
 }
 const cc = {
   sys: { isBrowser: false, localStorage: null },
-  _decorator: { ccclass: () => Type => Type }, Component: class {},
+  _decorator: { ccclass: () => Type => Type }, Component: class { schedule() {} unschedule() {} },
   BoxCollider, Camera, Color, DirectionalLight: class {}, UIOpacity, Widget,
   Tween: { stopAllByTarget() {} },
   ERigidBodyType: { STATIC: 0, KINEMATIC: 1, DYNAMIC: 2 },
@@ -96,42 +96,43 @@ const source = fs.readFileSync(path.join(__dirname, '../assets/scripts/StackWorl
 const compiled = ts.transpileModule(source, { compilerOptions: {
   target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.CommonJS,
 } }).outputText;
-const sandbox = { exports: {}, require: id => { assert.equal(id, 'cc'); return cc; } };
+const { CREAM_STYLE } = loadPlainModule('CreamStyle');
+const sandbox = { exports: {}, require: id => {
+  if (id === './CreamStyle') return { CREAM_STYLE };
+  assert.equal(id, 'cc'); return cc;
+} };
 vm.runInNewContext(compiled, sandbox);
 const { StackWorld3D } = sandbox.exports;
-const theme = { background: null, blockColors: [new Color(180, 220, 200)], materialTextures: [] };
 function setup() {
   const canvas = new Node('Canvas'); canvas.scene = new Node('Scene');
   const world = new StackWorld3D(canvas, 0.62);
   const base = { x: 0, z: 0, width: 5, depth: 5, level: 0 };
   const moving = { ...base, level: 1 };
-  world.setTheme(theme); world.sync([base], moving);
+  world.sync([base], moving);
   return { world, base, moving };
 }
 
-test('cyber edges share assets, preserve colliders and hide when switching themes', () => {
-  const { world, base, moving } = setup();
-  const baseNode = world.blockNodes.get(base);
-  const collider = baseNode.getComponent(BoxCollider);
-  world.setTheme({ ...theme, outlineColor: {} });
-  const edge = node => node.getChildByName('BlockVisual').getChildByName('ThemeOutline');
-  const baseEdge = edge(baseNode);
-  const movingEdge = edge(world.blockNodes.get(moving));
-  assert.equal(baseEdge.active, true);
-  assert.equal(baseEdge.getComponent(MeshRenderer).mesh, movingEdge.getComponent(MeshRenderer).mesh);
-  assert.equal(baseNode.getComponent(BoxCollider), collider);
-  const mesh = baseEdge.getComponent(MeshRenderer).mesh;
-  assert.equal(mesh.geometry.indices.length, 12 * 36);
-  assert.ok(mesh.geometry.positions.every(Number.isFinite));
-  world.setTheme(theme);
-  assert.equal(baseEdge.active, false);
-  world.destroy();
-  assert.equal(mesh.destroyed, true);
+test('a newly constructed world binds the cream background before exposing the first frame', () => {
+  const canvas = new Node('Canvas'); canvas.scene = new Node('Scene');
+  const world = new StackWorld3D(canvas, 0.62);
+  try {
+    assert.equal(world.backgroundNode.active, true);
+    const background = world.backgroundRenderer.material;
+    assert.ok(background);
+    assert.equal(background.destroyed, false);
+    assert.deepEqual(background.properties.mainColor, new Color(...CREAM_STYLE.backgroundColor));
+    assert.equal(background.properties.mainTexture, undefined);
+    assert.equal(world.worldRoot.getChildByName('CreamToyStage').active, true);
+    assert.equal(typeof world.setTheme, 'undefined');
+  } finally {
+    world.destroy();
+  }
 });
 
-test('tower fades use shared transparent materials, include debris/edges and leave background and bodies intact', () => {
+
+
+test('tower fades reuse transparent cream materials for debris and preserve background and physics', () => {
   const { world, base } = setup();
-  world.setTheme({ ...theme, outlineColor: new Color(90, 245, 255) });
   world.spawnFragment({ ...base, x: 3, width: 1 }, 'x', 1);
   const baseNode = world.blockNodes.get(base);
   const collider = baseNode.getComponent(BoxCollider);
@@ -145,9 +146,8 @@ test('tower fades use shared transparent materials, include debris/edges and lea
   const fade = renderer.material;
   assert.equal(fade.info.technique, 1);
   assert.equal(fade.getProperty('mainColor').a, 128);
-  assert.equal(visual.getChildByName('ThemeOutline').getComponent(MeshRenderer).material.getProperty('mainColor').a, 128);
   const fragment = [...world.looseNodes.keys()][0];
-  assert.equal(fragment.getChildByName('BlockVisual').getComponent(MeshRenderer).material.info.technique, 1);
+  assert.equal(fragment.getChildByName('BlockVisual').getComponent(MeshRenderer).material, fade);
   const count = world.ownedMaterials.size;
   world.setPresentationOpacity(0.2);
   assert.equal(renderer.material, fade);
@@ -168,12 +168,10 @@ test('tower fades use shared transparent materials, include debris/edges and lea
   assert.equal(incoming.getComponent(MeshRenderer).material, opaque);
   assert.equal(opaque.getProperty('mainColor').a, 255);
   world.setPresentationOpacity(0.5);
-  const retired = [...world.ownedMaterials];
-  world.setTheme(theme);
-  assert.ok(retired.every(m => m.destroyed));
-  assert.equal(incoming.getComponent(MeshRenderer).material.getProperty('mainColor').a, 128);
+  assert.equal(incoming.getComponent(MeshRenderer).material, fade);
+  const materials = [...world.ownedMaterials, ...world.toyMaterials];
   world.destroy();
-  assert.equal(fade.destroyed, true);
+  assert.ok(materials.every(material => material.destroyed));
 });
 
 test('only the intended support can resolve a drop, including a persistent contact', () => {
@@ -212,70 +210,57 @@ test('restart disables old colliders immediately and removes pending contact lis
   assert.equal(world.pollDrop(10), null);
   world.destroy();
 });
-test('theme changes release replaced materials and every block shares one mesh', () => {
-  const { world, base, moving } = setup();
-  const renderers = [...world.blockNodes.values()]
-    .map(n => n.getChildByName('BlockVisual').getComponent(MeshRenderer));
-  assert.equal(renderers[0].mesh, renderers[1].mesh);
-  for (let i = 0; i < 25; i++) {
-    const old = [...world.ownedMaterials];
-    world.setTheme(theme);
-    assert.ok(old.every(m => m.destroyed));
-    assert.ok(renderers.every(r => !r.material.destroyed));
-    assert.equal(world.ownedMaterials.size, 2);
+test('cream blocks share one bevel mesh and eight persistent palette materials across restarts', () => {
+  const { world, base } = setup();
+  const blocks = Array.from({ length: 24 }, (_, level) => ({ ...base, level }));
+  world.sync(blocks, null);
+  const renderers = blocks.map(block => world.blockNodes.get(block).getChildByName('BlockVisual').getComponent(MeshRenderer));
+  assert.ok(renderers.every(renderer => renderer.mesh === world.blockMesh));
+  assert.equal(new Set(renderers.map(renderer => renderer.material)).size, 8);
+  for (let index = 0; index < 24; index += 1) {
+    assert.deepEqual(renderers[index].material.getProperty('mainColor'), new Color(...CREAM_STYLE.blockPalette[index % 8]));
+    assert.equal(renderers[index].material.getProperty('mainTexture'), undefined);
   }
-  world.destroy();
-  assert.equal(renderers[0].mesh.destroyed, true);
-});
-test('decorated atlas uses separate top/side UVs and outward closed bevel faces', () => {
-  const { world } = setup();
-  for (let variant = 0; variant < 3; variant++) {
-    const mesh = world.decoratedMeshes[variant].geometry;
-    assert.equal(mesh.indices.length, 132);
-    const edgeCounts = new Map();
-    const vertex = i => mesh.positions.slice(i * 3, i * 3 + 3);
-    for (let i = 0; i < mesh.positions.length / 3; i++) {
-      const [u, v] = mesh.uvs.slice(i * 2, i * 2 + 2);
-      assert.ok(u > variant / 3 && u < (variant + 1) / 3);
-      assert.equal(v < 0.5, mesh.normals[i * 3 + 1] > 0.5);
-      assert.ok(vertex(i).every(value => Math.abs(value) <= 0.5));
-    }
-    for (let i = 0; i < mesh.indices.length; i += 3) {
-      const ids = mesh.indices.slice(i, i + 3);
-      const [p, q, r] = ids.map(vertex);
-      const a = q.map((v, j) => v - p[j]), b = r.map((v, j) => v - p[j]);
-      const cross = [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]];
-      assert.ok(cross.reduce((sum, v, j) => sum + v * mesh.normals[ids[0]*3+j], 0) > 0);
-      for (let j = 0; j < 3; j++) {
-        const key = [vertex(ids[j]).join(','), vertex(ids[(j+1)%3]).join(',')].sort().join('|');
-        edgeCounts.set(key, (edgeCounts.get(key) || 0) + 1);
-      }
-    }
-    assert.ok([...edgeCounts.values()].every(count => count === 2));
+  const materials = [...world.ownedMaterials];
+  for (let i = 0; i < 25; i += 1) {
+    world.reset();
+    world.sync(blocks, null);
+    assert.deepEqual([...world.ownedMaterials], materials);
+    assert.ok(materials.every(material => !material.destroyed));
   }
-  const meshes = [...world.decoratedMeshes];
+  const meshes = [world.blockMesh, world.backgroundRenderer.mesh];
+  const stageMaterials = [...world.toyMaterials];
   world.destroy();
+  assert.ok(materials.concat(stageMaterials).every(material => material.destroyed));
   assert.ok(meshes.every(mesh => mesh.destroyed));
 });
-test('decorated skins preserve image colors and restore classic meshes on switching back', () => {
-  const { world, base, moving } = setup();
-  const physical = world.blockNodes.get(moving);
-  const renderer = physical.getChildByName('BlockVisual').getComponent(MeshRenderer);
-  const originalScale = { ...physical.scale };
-  const atlas = { texture: {} };
-  world.setTheme({ ...theme, blockAtlas: atlas });
-  assert.equal(renderer.mesh, world.decoratedMeshes[1]);
-  assert.equal(renderer.material.properties.mainColor, cc.Color.WHITE);
-  assert.equal(renderer.material.properties.mainTexture, atlas.texture);
-  assert.deepEqual({ ...physical.scale }, originalScale);
-  world.spawnFragment({ ...moving, width: 0.2 }, 'x', 1);
-  const [loose] = world.looseNodes.keys();
-  assert.equal(loose.getChildByName('BlockVisual').getComponent(MeshRenderer).mesh, world.decoratedMeshes[1]);
-  world.setTheme(theme);
-  assert.equal(renderer.mesh, world.blockMesh);
-  assert.equal(loose.getChildByName('BlockVisual').getComponent(MeshRenderer).mesh, world.blockMesh);
+
+test('cream bevel geometry stays within the physics footprint and has closed outward faces', () => {
+  const { world } = setup();
+  const mesh = world.blockMesh.geometry;
+  assert.equal(mesh.indices.length, 132);
+  const edgeCounts = new Map();
+  const vertex = i => mesh.positions.slice(i * 3, i * 3 + 3);
+  for (let i = 0; i < mesh.positions.length / 3; i += 1) {
+    assert.ok(vertex(i).every(value => Number.isFinite(value) && Math.abs(value) <= 0.5));
+  }
+  for (let i = 0; i < mesh.indices.length; i += 3) {
+    const ids = mesh.indices.slice(i, i + 3);
+    const [p, q, r] = ids.map(vertex);
+    const a = q.map((v, j) => v - p[j]), b = r.map((v, j) => v - p[j]);
+    const cross = [a[1]*b[2]-a[2]*b[1], a[2]*b[0]-a[0]*b[2], a[0]*b[1]-a[1]*b[0]];
+    assert.ok(cross.reduce((sum, v, j) => sum + v * mesh.normals[ids[0]*3+j], 0) > 0);
+    for (let j = 0; j < 3; j += 1) {
+      const key = [vertex(ids[j]).join(','), vertex(ids[(j+1)%3]).join(',')].sort().join('|');
+      edgeCounts.set(key, (edgeCounts.get(key) || 0) + 1);
+    }
+  }
+  assert.ok([...edgeCounts.values()].every(count => count === 2));
   world.destroy();
 });
+
+
+
 test('perfect pulse scales only the visual child, freezes while paused, and settles', () => {
   const { world, base } = setup();
   const physical = world.blockNodes.get(base);
@@ -328,27 +313,29 @@ test('composition offset reframes menus without moving physical blocks', () => {
   const { world, base } = setup();
   const block = world.blockNodes.get(base);
   const originalBlockPosition = { ...block.position };
+  const originalCameraX = world.cameraNode.position.x;
   world.setCompositionOffset(-3.2);
-  assert.ok(Math.abs(world.cameraNode.position.x - 7.6) < 1e-9);
+  assert.ok(Math.abs(world.cameraNode.position.x - (originalCameraX - 3.2)) < 1e-9);
   assert.deepEqual({ ...block.position }, originalBlockPosition);
   world.setCompositionOffset(Number.NaN);
-  assert.ok(Math.abs(world.cameraNode.position.x - 10.8) < 1e-9);
+  assert.ok(Math.abs(world.cameraNode.position.x - originalCameraX) < 1e-9);
   world.destroy();
 });
 
 test('overview camera pulls back and targets the middle of the complete tower', () => {
   const { world, base } = setup();
   const blockPosition = { ...world.blockNodes.get(base).position };
+  const originalCamera = { ...world.cameraNode.position };
   world.setOverview(19);
   world.tick(1, 19, 0, 0);
   assert.ok(Math.abs(world.cameraTargetY - 6.2) < 1e-9);
-  assert.ok(world.cameraNode.position.x > 10.8);
-  assert.ok(world.cameraNode.position.z > 13.6);
+  assert.ok(world.cameraNode.position.x > originalCamera.x);
+  assert.ok(world.cameraNode.position.z > originalCamera.z);
   assert.deepEqual({ ...world.blockNodes.get(base).position }, blockPosition);
   world.setOverview(null);
   world.tick(1, 19, 0, 0);
   assert.equal(world.overviewTopLevel, null);
-  assert.ok(Math.abs(world.cameraNode.position.x - 10.8) < 1e-9);
+  assert.ok(Math.abs(world.cameraNode.position.x - originalCamera.x) < 1e-9);
   world.destroy();
 });
 
@@ -376,7 +363,7 @@ test('paused resize and overview refresh backdrop coverage without a simulation 
   const { world, base } = setup();
   try {
     cc.view.getVisibleSize = () => ({ width: 390 / 844 * 1334, height: 1334 });
-    world.setTheme({ ...theme, background: { texture: {}, rect: { width: 390, height: 844 } } });
+    world.setCompositionOffset(0);
     world.spawnFragment({ ...base, x: 3, width: 1 }, 'x', 1);
     const [fragment] = world.looseNodes.keys();
     const fragmentPosition = { ...fragment.position };
@@ -403,10 +390,6 @@ test('paused resize and overview refresh backdrop coverage without a simulation 
     assert.ok(world.backgroundNode.position.z < -38, 'overview immediately moves the backdrop behind the tower');
     assertCovered();
 
-    world.setTheme({ ...theme, background: { texture: {}, rect: { width: 1920, height: 1080 } } });
-    assert.ok(Math.abs(world.backgroundNode.scale.x / world.backgroundNode.scale.y - 1920 / 1080) < 1e-8,
-      'a new image aspect is applied even while paused');
-    assertCovered();
     world.setOverview(null);
     assert.equal(world.backgroundNode.position.z, -38);
     assertCovered();
@@ -448,7 +431,7 @@ const gameCompiled = ts.transpileModule(gameSource, { compilerOptions: {
   target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.CommonJS, experimentalDecorators: true,
 } }).outputText;
 function loadPlainModule(name) {
-  const runtime = { exports: {} };
+  const runtime = { exports: {}, require: id => { assert.equal(id, 'cc'); return cc; } };
   const moduleSource = fs.readFileSync(path.join(__dirname, `../assets/scripts/${name}.ts`), 'utf8');
   vm.runInNewContext(ts.transpileModule(moduleSource, { compilerOptions: {
     target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.CommonJS,
@@ -460,10 +443,131 @@ const leaderboardData = loadPlainModule('Leaderboard');
 const gameSandbox = { exports: {}, require: id => id === 'cc' ? cc
   : id === './ProjectorLayout' ? loadLayoutModule()
   : id === './Leaderboard' ? leaderboardData
+  : id === './ReviveClient' ? loadPlainModule('ReviveClient')
+  : id === './Stamina' ? loadPlainModule('Stamina')
+  : id === './CreamStyle' ? { CREAM_STYLE }
   : id === './RemoteInput' ? loadPlainModule('RemoteInput') : { StackWorld3D },
   navigator: { userAgent: 'test-browser' } };
 vm.runInNewContext(gameCompiled, gameSandbox);
 const GamePrototype = gameSandbox.exports.StackGame.prototype;
+
+function buildInitialWorld(game = new gameSandbox.exports.StackGame()) {
+  game.node = new Node('Canvas');
+  game.node.scene = new Node('Scene');
+  const reachedUI = new Error('initial world construction completed');
+  // Execute the real buildStage prefix, stopping at its first 2D UI node. No
+  // asset callback or rendering hook has run at this point.
+  game.makeNode = name => {
+    assert.equal(name, 'StackRenderer');
+    throw reachedUI;
+  };
+  try {
+    assert.throws(() => game.buildStage(), error => error === reachedUI);
+  } catch (error) {
+    game.world3D?.destroy();
+    throw error;
+  }
+  return game;
+}
+
+test('the controller creates a complete cream world before building its 2D interface', () => {
+  const game = buildInitialWorld();
+  const world = game.world3D;
+  try {
+    assert.equal(world.backgroundNode.active, true);
+    const background = world.backgroundRenderer.material;
+    assert.equal(background.destroyed, false);
+    assert.deepEqual(background.properties.mainColor, new Color(...CREAM_STYLE.backgroundColor));
+    assert.equal(background.properties.mainTexture, undefined);
+    assert.equal(world.worldRoot.getChildByName('CreamToyStage').active, true);
+  } finally {
+    world.destroy();
+  }
+});
+
+test('browser readiness follows the completed home setup and two draws, without any skin image request', () => {
+  const original = { isBrowser: cc.sys.isBrowser, director: cc.director, Director: cc.Director,
+    profiler: cc.profiler, ResolutionPolicy: cc.ResolutionPolicy, resources: cc.resources,
+    setDesignResolutionSize: cc.view.setDesignResolutionSize, localStorage: cc.sys.localStorage };
+  const draws = [];
+  const requests = [];
+  const events = [];
+  const order = [];
+  const game = new gameSandbox.exports.StackGame();
+  Object.assign(game, { isValid: true, bestScore: 0,
+    initializeAudio() {}, loadSettings() {},
+    buildStage() { order.push('stage'); }, resizeStage() { order.push('resize'); },
+    showReadyScreen() { order.push('home'); },
+  });
+  cc.sys.isBrowser = true;
+  cc.sys.localStorage = { getItem: () => null, setItem() {} };
+  cc.Director = { EVENT_AFTER_DRAW: 'after-draw' };
+  cc.director = { once(event, callback) {
+    assert.equal(event, 'after-draw');
+    assert.deepEqual(order, ['stage', 'resize', 'home']);
+    draws.push(callback);
+  } };
+  cc.profiler = { hideStats() {} };
+  cc.ResolutionPolicy = { FIXED_HEIGHT: 0 };
+  cc.view.setDesignResolutionSize = () => {};
+  cc.resources = { load(name) { requests.push(name); } };
+  gameSandbox.window = { dispatchEvent(event) { events.push(event.type); } };
+  gameSandbox.Event = class { constructor(type) { this.type = type; } };
+  try {
+    game.onLoad();
+    assert.equal(events.length, 0);
+    assert.equal(draws.length, 1);
+    draws.shift()();
+    assert.equal(events.length, 0);
+    assert.equal(draws.length, 1);
+    draws.shift()();
+    assert.deepEqual(events, ['stack-game-ready']);
+    game.notifyBrowserReady();
+    assert.equal(draws.length, 0, 'repeated requests cannot schedule another ready event');
+    assert.deepEqual(requests, []);
+    assert.doesNotMatch(gameSource, /resources\.load\(|skins\/|blockAtlases|skinBackgrounds|loadThemeBackgrounds/);
+  } finally {
+    cc.sys.isBrowser = original.isBrowser;
+    cc.sys.localStorage = original.localStorage;
+    cc.view.setDesignResolutionSize = original.setDesignResolutionSize;
+    for (const key of ['director', 'Director', 'profiler', 'ResolutionPolicy', 'resources']) {
+      if (original[key] === undefined) delete cc[key]; else cc[key] = original[key];
+    }
+    delete gameSandbox.window;
+    delete gameSandbox.Event;
+  }
+});
+
+test('browser readiness is cancelled for a destroyed controller and omitted outside browsers', () => {
+  const originalBrowser = cc.sys.isBrowser;
+  const originalDirector = cc.director;
+  const originalDirectorType = cc.Director;
+  const draws = [];
+  const events = [];
+  cc.Director = { EVENT_AFTER_DRAW: 'after-draw' };
+  cc.director = { once(event, callback) { draws.push(callback); } };
+  gameSandbox.window = { dispatchEvent(event) { events.push(event); } };
+  gameSandbox.Event = class {};
+  try {
+    const game = new gameSandbox.exports.StackGame();
+    game.isValid = true;
+    cc.sys.isBrowser = false;
+    game.notifyBrowserReady();
+    assert.equal(draws.length, 0);
+    cc.sys.isBrowser = true;
+    game.notifyBrowserReady();
+    draws.shift()();
+    game.isValid = false;
+    draws.shift()();
+    assert.deepEqual(events, []);
+  } finally {
+    cc.sys.isBrowser = originalBrowser;
+    if (originalDirector === undefined) delete cc.director; else cc.director = originalDirector;
+    if (originalDirectorType === undefined) delete cc.Director; else cc.Director = originalDirectorType;
+    delete gameSandbox.window;
+    delete gameSandbox.Event;
+  }
+});
 
 test('home button construction does not refresh focus before the start prompt exists', () => {
   const start = gameSource.indexOf('private buildHomeButtons');
@@ -473,12 +577,12 @@ test('home button construction does not refresh focus before the start prompt ex
   assert.ok(gameSource.includes('|| !this.startPromptLabel)'));
 });
 
-test('web startup cover prevents the engine clear color from flashing before the themed frame', () => {
+test('web startup cover prevents the engine clear color from flashing before the cream frame', () => {
   assert.match(webTemplate, /id="game-boot-cover"/);
   assert.match(webTemplate, /body\.game-ready #GameCanvas/);
   assert.match(webTemplate, /window\.addEventListener\('stack-game-ready'/);
   assert.match(gameSource, /window\.dispatchEvent\(new Event\('stack-game-ready'\)\)/);
-  assert.match(gameSource, /this\.drawFrame\(\);\s*this\.notifyBrowserReady\(\);/);
+  assert.match(gameSource, /this\.showReadyScreen\(\);\s*this\.notifyBrowserReady\(\);/);
 });
 
 test('home menu exposes default focus and remote direction, confirm, and back actions', () => {
@@ -719,40 +823,9 @@ test('nickname gamepad focus reaches input, Save and Cancel and a held direction
   assert.deepEqual(actions, ['save', 'cancel']);
 });
 
-test('skin menu uses one continuous vertical focus order including return home', () => {
-  const game = Object.create(GamePrototype);
-  Object.assign(game, { skinSelection: 0, updateSkinShopUI() {} });
 
-  game.moveSkinSelection(0, -1);
-  assert.equal(game.skinSelection, 1);
-  game.moveSkinSelection(1, 0);
-  assert.equal(game.skinSelection, 2);
-  game.skinSelection = 6;
-  game.moveSkinSelection(0, -1);
-  assert.equal(game.skinSelection, 0);
-  game.moveSkinSelection(0, 1);
-  assert.equal(game.skinSelection, 6);
-});
 
-test('retained skin menu geometry keeps previews and text apart and respects legacy panel insets', () => {
-  const horizontalGap = (leftCenter, leftWidth, rightCenter, rightWidth) =>
-    rightCenter - rightWidth / 2 - (leftCenter + leftWidth / 2);
-  const verticalGap = (upperCenter, upperHeight, lowerCenter, lowerHeight) =>
-    upperCenter - upperHeight / 2 - (lowerCenter + lowerHeight / 2);
 
-  assert.ok(horizontalGap(-205, 82, -15, 250) >= 16);
-  assert.ok(horizontalGap(-205, 82, -5, 270) >= 16);
-  assert.ok(verticalGap(545, 86, 450, 56) >= 16);
-  // Live projector screen geometry is exercised through the actual controller
-  // in test-home-layout.cjs, not asserted against retired coordinate literals.
-
-  const game = Object.create(GamePrototype);
-  Object.assign(game, { wideLayout: true, tvLayout: false, visibleWidth: 1400 });
-  const panelCenter = game.panelCenterX();
-  assert.ok(panelCenter - 610 / 2 >= -1400 / 2 + 24);
-  game.wideLayout = false;
-  assert.equal(game.panelCenterX(), 0);
-});
 
 test('pause, failure and result use a full-tower overview and share the projector composition breakpoint', () => {
   for (const [width, height, split] of [[1920, 1080, true], [1024, 768, true], [390, 844, false]]) {
@@ -836,30 +909,13 @@ test('all perfect frame waves project to the contact plane, including reduced mo
     game.drawEffects(graphics);
     assert.ok(heights.length > 0);
     assert.ok(heights.every(level => level === block.level));
-    heights.length = 0;
-    game.topPoints(block);
-    assert.ok(heights.every(level => level === block.level + 1));
   }
 });
 
-test('default layers repeat the eight-color pastel rainbow with distinct adjacent layers', () => {
-  const game = Object.create(GamePrototype);
-  assert.deepEqual(Array.from(game.minimalLayerColor(0)), [153, 199, 199]);
-  assert.deepEqual(Array.from(game.minimalLayerColor(4)), [225, 175, 180]);
-  for (let level = 0; level < 128; level += 1) {
-    const a = game.minimalLayerColor(level);
-    const b = game.minimalLayerColor(level + 1);
-    assert.notDeepEqual(a, b);
-    assert.deepEqual(a, game.minimalLayerColor(level + 8));
-    assert.ok(a.every(value => value >= 150 && value <= 240));
-  }
-});
 
-test('toy theme adds a solid cream table and preserves block dimensions and resource ownership', () => {
+test('the permanent cream table preserves block dimensions and resource ownership', () => {
   const { world, base } = setup();
-  const pastel = { ...theme, softToy: true, backgroundColor: new cc.Color(210, 188, 181) };
-  world.setTheme(pastel);
-  const stage = world.toyStage;
+  const stage = world.worldRoot.getChildByName('CreamToyStage');
   const materials = Array.from(world.toyMaterials);
   assert.equal(stage.active, true);
   assert.equal(stage.children.length, 17);
@@ -889,14 +945,10 @@ test('toy theme adds a solid cream table and preserves block dimensions and reso
     assert.ok(Math.abs(node.position.y - node.scale.y / 2 + 0.14) < 1e-8);
   }
   const block = world.blockNodes.get(base);
-  assert.equal(block.getChildByName('BlockVisual').getComponent(MeshRenderer).mesh, world.toyMesh);
+  assert.equal(block.getChildByName('BlockVisual').getComponent(MeshRenderer).mesh, world.blockMesh);
   assert.equal(block.scale.x, base.width);
   assert.equal(block.scale.z, base.depth);
-  assert.equal(world.backgroundMaterial.properties.mainColor, pastel.backgroundColor);
-  world.setTheme(theme);
-  assert.equal(stage.active, false);
-  world.setTheme(pastel);
-  assert.equal(world.toyStage, stage);
+  assert.deepEqual(world.backgroundRenderer.material.properties.mainColor, new Color(...CREAM_STYLE.backgroundColor));
   assert.deepEqual(Array.from(world.toyMaterials), materials);
   world.reset();
   assert.equal(stage.isValid, true);
@@ -907,10 +959,9 @@ test('toy theme adds a solid cream table and preserves block dimensions and reso
 
 test('all stage contacts never award a layer and all falling bodies use continuous collision detection', () => {
   const { world, base, moving } = setup();
-  world.setTheme({ ...theme, softToy: true });
   world.beginDrop(moving, base);
   assert.equal(world.droppingNode.getComponent(RigidBody).useCCD, true);
-  for (const node of world.toyStage.children.filter(node => node.getComponent(BoxCollider))) {
+  for (const node of world.worldRoot.getChildByName('CreamToyStage').children.filter(node => node.getComponent(BoxCollider))) {
     world.dropCollider.emit('onCollisionEnter', node.getComponent(BoxCollider));
     world.dropCollider.emit('onCollisionStay', node.getComponent(BoxCollider));
     assert.equal(world.pollDrop(0.01), null, `${node.name} is not the intended stack support`);
@@ -926,25 +977,7 @@ test('all stage contacts never award a layer and all falling bodies use continuo
   world.destroy();
 });
 
-test('sharp image blocks use six faces and per-layer tints without modifying colliders', () => {
-  const { world, base, moving } = setup();
-  const colors = [{ r: 30 }, { r: 50 }];
-  const atlas = { texture: {} };
-  world.setTheme({ ...theme, blockAtlas: atlas, blockAtlasOrder: [0], blockColors: colors, sharpEdges: true, tintAtlas: true });
-  const node = world.blockNodes.get(base);
-  const renderer = node.getChildByName('BlockVisual').getComponent(MeshRenderer);
-  assert.equal(renderer.mesh.geometry.indices.length, 36);
-  assert.equal(renderer.material.properties.mainTexture, atlas.texture);
-  assert.equal(world.materialForLevel(0).properties.mainColor, colors[0]);
-  assert.equal(world.materialForLevel(1).properties.mainColor, colors[1]);
-  assert.equal(world.materialForLevel(2), world.materialForLevel(0));
-  assert.equal(node.scale.x, base.width);
-  assert.equal(node.scale.z, base.depth);
-  world.setTheme({ ...theme, blockAtlas: atlas });
-  assert.equal(renderer.mesh.geometry.indices.length, 132);
-  assert.equal(renderer.material.properties.mainColor, cc.Color.WHITE);
-  world.destroy();
-});
+
 
 function homeTransitionGame(phase = 'gameover', reducedMotion = false) {
   const game = Object.create(GamePrototype);
@@ -957,7 +990,7 @@ function homeTransitionGame(phase = 'gameover', reducedMotion = false) {
     transitionViews: [], heldKeys: new Set(),
     world3D: { setPaused(value) { pauses.push(value); }, setPresentationOpacity(value) { opacities.push(value); } },
     transitionBlocker: { active: false }, effectsGraphics: { clear() {}, node: { active: true } },
-    currentSkin: () => ({ visualStyle: 'minimal' }), drawScreenDimmer(alpha) { this.dimAlpha = alpha; },
+    drawScreenDimmer(alpha) { this.dimAlpha = alpha; },
     drawFrame() {},
     showReadyScreen() { resets += 1; this.setScreen('ready'); },
     setScreen(next, overlay = 'none') {
@@ -1169,9 +1202,9 @@ test('closing the real leaderboard restores button focus, invalidates pending lo
   let previewLoads = 0;
   let focused;
   Object.assign(game, {
-    skinsGroup: new Node('Skins'), leaderboardRequest: 3, homeLeaderboardPreviewRequest: 4,
+    leaderboardRequest: 3, homeLeaderboardPreviewRequest: 4,
     loadLeaderboard() { fullLoads += 1; }, loadHomeLeaderboardPreview() { previewLoads += 1; },
-    updateHomeMenuFocus() { focused = this.homeSelection; }, updateSettingsUI() {}, updateSkinShopUI() {},
+    updateHomeMenuFocus() { focused = this.homeSelection; }, updateSettingsUI() {},
   });
   game.onLeaderboardButton();
   assert.equal(game.homeOverlay, 'leaderboard');
@@ -1214,20 +1247,16 @@ test('resize settles navigation before layout and remote keys pressed in transit
   assert.equal(game.heldKeys.has(13), true);
 });
 
-test('all theme transitions cap the dimmer and restore complete panel opacity/anchors', () => {
-  for (const skin of ['minimal-stack', 'classic', 'cyber-neon', 'porcelain-moon', 'pastel-toy', 'nature-zen']) {
-    const { game } = homeTransitionGame('ready');
-    delete game.currentSkin;
-    game.selectedSkinId = skin;
-    game.beginScreenTransition(() => game.setScreen('ready', 'settings'), 'menu-open');
-    for (let i = 0; i < 27; i++) {
-      game.updateHomeTransition(0.01);
-      assert.ok(game.dimAlpha >= 0 && game.dimAlpha <= 51, skin);
-    }
-    assert.equal(game.settingsGroup.getComponent(UIOpacity).opacity, 255, skin);
-    assert.equal(game.settingsGroup.position.x, 0, skin);
-    assert.equal(game.settingsGroup.getComponent(Widget).enabled, true, skin);
+test('cream transitions cap the dimmer and restore complete panel opacity and anchors', () => {
+  const { game } = homeTransitionGame('ready');
+  game.beginScreenTransition(() => game.setScreen('ready', 'settings'), 'menu-open');
+  for (let i = 0; i < 27; i += 1) {
+    game.updateHomeTransition(0.01);
+    assert.ok(game.dimAlpha >= 0 && game.dimAlpha <= 51);
   }
+  assert.equal(game.settingsGroup.getComponent(UIOpacity).opacity, 255);
+  assert.equal(game.settingsGroup.position.x, 0);
+  assert.equal(game.settingsGroup.getComponent(Widget).enabled, true);
 });
 
 test('navigation has no full-screen cover renderer and panels own backgrounds with their content', () => {
@@ -1239,51 +1268,254 @@ test('navigation has no full-screen cover renderer and panels own backgrounds wi
   assert.doesNotMatch(backdrop, /graphics\.rect\(/, 'modal panel must not carry a full-screen moving dimmer');
 });
 
-function loadSkinSave(entries = {}) {
+function loadGameSave(entries = {}, removeFailure = null) {
   const values = new Map(Object.entries(entries));
+  const reads = [], writes = [], removals = [];
+  const originalStorage = cc.sys.localStorage;
   cc.sys.localStorage = {
-    getItem(key) { return values.has(key) ? values.get(key) : null; },
-    setItem(key, value) { values.set(key, value); },
+    getItem(key) { reads.push(key); return values.has(key) ? values.get(key) : null; },
+    setItem(key, value) { writes.push(key); values.set(key, value); },
+    removeItem(key) {
+      removals.push(key);
+      if (removeFailure && removeFailure(key)) throw new Error('removal unavailable');
+      values.delete(key);
+    },
   };
-  const game = Object.create(GamePrototype);
-  game.loadSettings();
-  return { game, values };
+  try {
+    const game = new gameSandbox.exports.StackGame();
+    game.loadSettings();
+    game.saveEconomy();
+    return { game, values, reads, writes, removals };
+  } finally {
+    cc.sys.localStorage = originalStorage;
+  }
 }
 
-test('new players start with the free minimal theme and 100 coins', () => {
-  const { game } = loadSkinSave();
-  assert.equal(game.selectedSkinId, 'minimal-stack');
-  assert.deepEqual(Array.from(game.ownedSkins), ['minimal-stack', 'classic']);
+const progressSave = {
+  'wxstack-coins': '46', 'wxstack-initial-coins-v1': '1', 'wxstack-best-score': '28',
+  'wxstack-sound-enabled': '0', 'wxstack-reduced-motion': '1', 'wxstack-nickname': '奶油玩家',
+  'wxstack-leaderboard-v1': JSON.stringify({ version: 1, entries: [{ id: 'old-round', score: 28 }] }),
+};
+function assertProgressPreserved(game, values) {
+  assert.equal(game.coins, 46);
+  assert.equal(game.bestScore, 28);
+  assert.equal(game.soundEnabled, false);
+  assert.equal(game.reducedMotion, true);
+  assert.equal(game.playerNickname, '奶油玩家');
+  for (const [key, value] of Object.entries(progressSave)) assert.equal(values.get(key), value, key);
+}
+function assertCreamWorld(game) {
+  buildInitialWorld(game);
+  try {
+    assert.deepEqual(game.world3D.backgroundRenderer.material.getProperty('mainColor'), new Color(...CREAM_STYLE.backgroundColor));
+    assert.equal(game.world3D.worldRoot.getChildByName('CreamToyStage').active, true);
+    assert.equal('selectedSkinId' in game, false);
+    assert.equal('ownedSkins' in game, false);
+  } finally {
+    game.world3D.destroy();
+  }
+}
+
+test('new players receive 100 coins and start directly in cream without appearance state', () => {
+  const { game, values, reads, writes, removals } = loadGameSave();
   assert.equal(game.coins, 100);
+  assert.equal(game.bestScore, 0);
+  assert.equal(game.soundEnabled, true);
+  assert.equal(game.reducedMotion, false);
+  assert.equal(values.get('wxstack-initial-coins-v1'), '1');
+  assert.deepEqual(removals, ['wxstack-selected-skin', 'wxstack-owned-skins']);
+  assert.ok(reads.concat(writes).every(key => !key.includes('skin')));
+  assertCreamWorld(game);
 });
 
-test('adding the free theme preserves existing purchases, selection and coin balance', () => {
-  for (const selected of ['classic', 'nature-zen']) {
-    const { game, values } = loadSkinSave({
-      'wxstack-selected-skin': selected,
-      'wxstack-owned-skins': JSON.stringify(['classic', 'nature-zen']),
-      'wxstack-coins': '46', 'wxstack-initial-coins-v1': '1',
-      'wxstack-best-score': '28',
-    });
-    assert.equal(game.selectedSkinId, selected);
-    assert.equal(game.coins, 46);
-    assert.equal(game.bestScore, 28);
-    assert.ok(game.ownedSkins.has('minimal-stack'));
-    assert.ok(game.ownedSkins.has('nature-zen'));
-    game.saveEconomy();
-    assert.equal(values.get('wxstack-selected-skin'), selected);
-    assert.ok(JSON.parse(values.get('wxstack-owned-skins')).includes('minimal-stack'));
+test('all retired selections and malformed skin records are removed while progress remains intact', () => {
+  for (const selected of ['minimal-stack', 'classic', 'cyber-neon', 'porcelain-moon', 'pastel-toy', 'nature-zen', 'sunset', 'unknown']) {
+    for (const owned of ['["classic","nature-zen"]', '{malformed']) {
+      const { game, values, reads, writes } = loadGameSave({ ...progressSave,
+        'wxstack-selected-skin': selected, 'wxstack-owned-skins': owned,
+      });
+      assert.equal(values.has('wxstack-selected-skin'), false);
+      assert.equal(values.has('wxstack-owned-skins'), false);
+      assertProgressPreserved(game, values);
+      assert.ok(reads.concat(writes).every(key => !key.includes('skin')));
+      assertCreamWorld(game);
+    }
   }
 });
 
-test('legacy skin migration still works and unknown selections fall back to minimal', () => {
-  const { game } = loadSkinSave({
-    'wxstack-selected-skin': 'sunset',
-    'wxstack-owned-skins': '["sunset"]',
+test('a failed obsolete-key removal cannot prevent the other removal or loading saved progress', () => {
+  for (const failedKey of ['wxstack-selected-skin', 'wxstack-owned-skins', 'both']) {
+    const { game, values, reads, writes, removals } = loadGameSave({ ...progressSave,
+      'wxstack-selected-skin': 'nature-zen', 'wxstack-owned-skins': '{malformed',
+    }, key => key === failedKey || failedKey === 'both');
+    assert.deepEqual(removals, ['wxstack-selected-skin', 'wxstack-owned-skins']);
+    for (const key of removals) assert.equal(values.has(key), key === failedKey || failedKey === 'both');
+    assertProgressPreserved(game, values);
+    assert.ok(reads.concat(writes).every(key => !key.includes('skin')));
+    assertCreamWorld(game);
+  }
+});
+
+test('unavailable storage keeps cream startup and session settings usable', () => {
+  const originalStorage = cc.sys.localStorage;
+  try {
+    for (const storage of [null, {
+      getItem() { throw new Error('blocked'); }, setItem() { throw new Error('blocked'); },
+      removeItem() { throw new Error('blocked'); },
+    }]) {
+      cc.sys.localStorage = storage;
+      const game = new gameSandbox.exports.StackGame();
+      assert.doesNotThrow(() => game.loadSettings());
+      assert.equal(game.coins, 100);
+      assert.equal(game.bestScore, 0);
+      assert.equal(game.soundEnabled, true);
+      assert.equal(game.reducedMotion, false);
+      assert.equal(game.playerNickname, leaderboardData.DEFAULT_NICKNAME);
+      game.coins = 116;
+      game.soundEnabled = false;
+      game.reducedMotion = true;
+      assert.doesNotThrow(() => game.saveEconomy());
+      assert.doesNotThrow(() => game.saveUserSettings());
+      assert.equal(game.coins, 116);
+      assert.equal(game.soundEnabled, false);
+      assert.equal(game.reducedMotion, true);
+      assertCreamWorld(game);
+    }
+  } finally {
+    cc.sys.localStorage = originalStorage;
+  }
+});
+
+test('confirmed revival restores the top and moving block to half size while preserving lower layers and stamina', () => {
+  const game = Object.create(GamePrototype);
+  const stack = [{ x: 0.2, z: -0.1, width: 4, depth: 3, level: 0 },
+    { x: 0.3, z: -0.1, width: 3.8, depth: 3, level: 1 }];
+  let resets = 0;
+  Object.assign(game, {
+    phase: 'gameover', roundId: 'same-round', roundWasTest: false, roundNickname: '原玩家',
+    roundPerfectCount: 1, roundRewardedPerfectCount: 1, coins: 101, score: 1, stack,
+    world3D: { reset() { resets++; } },
+    stamina: { spend() { assert.fail('revival must not spend stamina'); } },
+    resultGroup: { active: true }, pauseGroup: { active: false },
+    gameplayHudGroup: { active: false }, pauseButton: { active: false },
+    fallingPieces: [{}], sparks: [{}], rings: [{}], perfectFrames: [{}],
+    updateWorldComposition() {}, updateTestModeUI() {}, resetPerfectFeedback() {},
+    setScore(value) { assert.equal(value, 1); }, drawFrame() {},
   });
-  assert.equal(game.selectedSkinId, 'cyber-neon');
-  assert.ok(game.ownedSkins.has('cyber-neon'));
-  assert.equal(loadSkinSave({ 'wxstack-selected-skin': 'unknown' }).game.selectedSkinId, 'minimal-stack');
+  game.resumeRevivedRound();
+  assert.equal(resets, 1);
+  assert.equal(game.stack, stack);
+  assert.equal(game.roundId, 'same-round');
+  assert.equal(game.roundNickname, '原玩家');
+  assert.equal(game.roundPerfectCount, 1);
+  assert.equal(game.roundRewardedPerfectCount, 1);
+  assert.equal(game.coins, 101);
+  assert.equal(game.current.level, 2);
+  assert.equal(game.current.width, 2.5);
+  assert.equal(game.current.depth, 2.5);
+  assert.equal(stack[1].width, 2.5);
+  assert.equal(stack[1].depth, 2.5);
+  assert.equal(stack[0].width, 4);
+  assert.equal(stack[0].depth, 3);
+  assert.equal(game.openingBlockEntering, true);
+  assert.equal(game.gameplayHudGroup.active, true);
+  assert.equal(game.resultGroup.active, false);
+  assert.equal(game.fallingPieces.length, 0);
+  assert.equal(game.phase, 'playing');
+});
+
+test('QR confirmation is accepted once and late responses after cancellation cannot resume play', async () => {
+  const create = () => {
+    const game = Object.create(GamePrototype);
+    let resumed = 0, cancelled = 0;
+    Object.assign(game, { isValid: true, phase: 'gameover', roundId: 'round-one',
+      reviveRequest: 1, reviveUsed: false, revivePolling: false,
+      reviveGroup: { active: true }, reviveQr: { clear() {} }, reviveStatusLabel: { string: '' },
+      reviveSession: { expiresAt: Date.now() + 300000 },
+      drawReviveQR() {},
+      beginScreenTransition(swap) { swap(); }, resumeRevivedRound() { resumed++; },
+      reviveClient: { async status() { return { state: 'confirmed' }; },
+        async consume() { return { state: 'consumed' }; }, async cancel() { cancelled++; } },
+    });
+    return { game, resumed: () => resumed, cancelled: () => cancelled };
+  };
+  const accepted = create();
+  await accepted.game.pollRevive();
+  await accepted.game.pollRevive();
+  assert.equal(accepted.resumed(), 1);
+  assert.equal(accepted.game.reviveUsed, true);
+  assert.equal(accepted.game.reviveGroup.active, false);
+  const stale = create();
+  let resolve;
+  stale.game.reviveClient.status = () => new Promise(done => { resolve = done; });
+  stale.game.reviveClient.consume = () => assert.fail('cancelled QR must not be consumed');
+  const pending = stale.game.pollRevive();
+  stale.game.closeRevive();
+  resolve({ state: 'confirmed' });
+  await pending;
+  assert.equal(stale.resumed(), 0);
+  assert.equal(stale.cancelled(), 1);
+});
+
+test('result focus skips used revival and the QR modal captures back, confirm and pointer input', () => {
+  const game = Object.create(GamePrototype);
+  Object.assign(game, { resultSelection: 0, reviveUsed: false, updateResultFocus() {},
+    phase: 'gameover', heldKeys: new Set(), reviveGroup: { active: false }, homeOverlay: 'none' });
+  game.moveResultSelection(-1); assert.equal(game.resultSelection, 2);
+  game.moveResultSelection(1); assert.equal(game.resultSelection, 0);
+  game.reviveUsed = true; game.resultSelection = 1;
+  game.moveResultSelection(-1); assert.equal(game.resultSelection, 2);
+  game.moveResultSelection(1); assert.equal(game.resultSelection, 1);
+  let closes = 0;
+  game.reviveGroup.active = true;
+  game.closeRevive = () => { closes++; };
+  game.returnToHome = game.tryPrimaryAction = () => assert.fail('modal input must not reach underlying buttons');
+  game.handleKeyDownCode(cc.KeyCode.ESCAPE);
+  game.handleKeyDownCode(cc.KeyCode.ENTER);
+  game.onPointerAction();
+  assert.equal(closes, 2);
+});
+
+test('rapid opening clicks cannot drop the first block before it enters the support footprint', () => {
+  const game = Object.create(GamePrototype);
+  const releases = [];
+  const misses = [];
+  Object.assign(game, {
+    stack: [{ x: 0, z: 0, width: 5, depth: 5, level: 0 }],
+    score: 0, phase: 'playing', spawnDelay: 0,
+    world3D: { beginDrop(block) { releases.push(block); } },
+    failPlacement(block) { misses.push(block); },
+  });
+  game.spawnMovingBlock();
+  const first = game.current;
+  for (let i = 0; i < 3; i += 1) {
+    game.updateMovingBlock(0.05);
+    game.placeCurrentBlock();
+    assert.equal(game.current, first);
+    assert.equal(game.phase, 'playing');
+    assert.equal(releases.length, 0);
+  }
+  game.updateMovingBlock(0.4);
+  game.placeCurrentBlock();
+  assert.equal(releases.length, 1);
+  assert.equal(game.phase, 'dropping');
+  assert.equal(misses.length, 0);
+
+  // A fresh round is protected again, but missing after the first pass is valid.
+  game.phase = 'playing';
+  game.spawnMovingBlock();
+  game.placeCurrentBlock();
+  assert.equal(releases.length, 1);
+  for (let i = 0; i < 60; i += 1) game.updateMovingBlock(0.05);
+  game.placeCurrentBlock();
+  assert.equal(misses.length, 1);
+
+  // Later blocks retain the normal immediate drop/miss rules.
+  game.phase = 'playing';
+  game.stack.push({ x: 0, z: 0, width: 5, depth: 5, level: 1 });
+  game.spawnMovingBlock();
+  game.placeCurrentBlock();
+  assert.equal(misses.length, 2);
 });
 
 test('consecutive perfects grow both dimensions from streak two and cap at the base size', () => {

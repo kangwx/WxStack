@@ -159,6 +159,18 @@ test('local ranking keeps Top 10, breaks ties by perfects then time, and survive
   assert.equal(snapshot.persistent, true);
 });
 
+test('revival upgrades only its original round and never adds a duplicate or lowers the record', async () => {
+  const store = storage();
+  const repo = new LocalLeaderboardRepository(store);
+  await repo.submit(round('revive-round', 10, 3));
+  await repo.submit({ ...round('revive-round', 16, 5), revived: true });
+  await repo.submit({ ...round('revive-round', 12, 4), revived: true });
+  const entries = (await new LocalLeaderboardRepository(store).list()).entries;
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].score, 16);
+  assert.equal(entries[0].perfectCount, 5);
+});
+
 test('duplicate submissions and test rounds do not create additional entries', async () => {
   const repo = new LocalLeaderboardRepository(storage());
   await repo.submit(round('same', 10, 3));

@@ -44,7 +44,7 @@ test('Android WebView raw DPAD directions match DOM arrows without remapping des
   assert.equal(browserGameKey({ key:'ArrowDown', keyCode:20 }, true), 40);
 });
 
-test('remote keys route through home, shop, settings, ranking, play, pause and results', () => {
+test('remote keys route through home, settings, ranking, play, pause and results', () => {
   const source = fs.readFileSync('assets/scripts/StackGame.ts', 'utf8');
   const method = source.slice(source.indexOf('  private handleKeyDownCode('), source.indexOf('  private onKeyUp('));
   const runtime = {
@@ -55,26 +55,25 @@ test('remote keys route through home, shop, settings, ranking, play, pause and r
   vm.runInNewContext(ts.transpileModule(method.replace('private handleKeyDownCode', 'function handleKeyDownCode'), {}).outputText, runtime);
   const calls = [];
   const state = { heldKeys: new Set(), homeOverlay:'none', phase:'ready', resultSelection:0 };
-  for (const name of ['moveHomeSelection','activateHomeSelection','moveSkinSelection','activateSkinSelection',
+  for (const name of ['moveHomeSelection','activateHomeSelection',
     'closeHomeOverlay','moveSettingsSelection','activateSettingsSelection','tryPrimaryAction','togglePause',
-    'selectPauseOption','activatePauseSelection','updateResultFocus','activateResultSelection','returnToHome',
+    'selectPauseOption','activatePauseSelection','moveResultSelection','activateResultSelection','returnToHome',
     'moveLeaderboardSelection','changeLeaderboardPage','activateLeaderboardSelection']) {
     state[name] = (...args) => calls.push([name, ...args]);
   }
   const press = key => { state.heldKeys.clear(); runtime.handleKeyDownCode.call(state, androidGameKey(key)); };
   press(20); press(23);
-  state.homeOverlay='skins'; press(20); press(23); press(4);
   state.homeOverlay='settings'; press(19); press(23);
   state.homeOverlay='leaderboard'; press(19); press(20); press(21); press(22); press(23); press(4);
   state.homeOverlay='none'; state.phase='playing'; press(23); press(4); press(82);
   state.phase='paused'; press(20); press(23);
   state.phase='gameover'; press(20); press(23); press(4);
-  assert.deepEqual(calls.map(c=>c[0]), ['moveHomeSelection','activateHomeSelection','moveSkinSelection',
-    'activateSkinSelection','closeHomeOverlay','moveSettingsSelection','activateSettingsSelection',
+  assert.deepEqual(calls.map(c=>c[0]), ['moveHomeSelection','activateHomeSelection',
+    'moveSettingsSelection','activateSettingsSelection',
     'moveLeaderboardSelection','moveLeaderboardSelection','changeLeaderboardPage','changeLeaderboardPage',
     'activateLeaderboardSelection','closeHomeOverlay',
     'tryPrimaryAction','togglePause','togglePause','selectPauseOption','activatePauseSelection',
-    'updateResultFocus','activateResultSelection','returnToHome']);
+    'moveResultSelection','activateResultSelection','returnToHome']);
   assert.deepEqual(calls.filter(c => c[0] === 'moveLeaderboardSelection').map(c => c[1]), [-1, 1]);
   assert.deepEqual(calls.filter(c => c[0] === 'changeLeaderboardPage').map(c => c[1]), [-1, 1]);
   const count = calls.length;

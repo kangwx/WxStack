@@ -62,9 +62,9 @@ export function projectorPanelLayout(
   const contentWidth = panelWidth - (leaderboard ? (split ? 96 : 56) : (split ? 128 : 80));
   const buttonWidth = Math.min(640, contentWidth);
   const buttonYs = leaderboard ? []
-    : kind === 'settings' ? [120, -14, -148, -282, -416]
+    : kind === 'settings' ? [160, 40, -80, -200, -320, -440]
     : kind === 'pause' ? [60, -116, -292]
-    : [-224, -386];
+    : [-148, -286, -424];
   const rowWidth = leaderboard ? contentWidth - 20 : buttonWidth;
   const rowPadding = 20;
   const rankWidth = split ? 80 : 72;
@@ -80,7 +80,7 @@ export function projectorPanelLayout(
     panelHeight,
     contentWidth,
     buttonWidth,
-    buttonHeight: (leaderboard ? 68 : kind === 'settings' ? 104 : 116) * scale,
+    buttonHeight: (leaderboard ? 68 : kind === 'settings' ? 88 : kind === 'result' ? 104 : 116) * scale,
     titleY: (leaderboard ? 476 : 350) * scale,
     titleSize: Math.min(split ? 88 : 64, contentWidth / 5) * scale,
     subtitleY: (leaderboard ? 384 : 250) * scale,
@@ -102,10 +102,10 @@ export function projectorPanelLayout(
     detailWidth,
     headerY: (leaderboard ? 320 : 288) * scale,
     pageY: -289 * scale,
-    scoreY: 144 * scale,
+    scoreY: (kind === 'result' ? 180 : 144) * scale,
     scoreSize: 144 * scale,
-    bestY: 8 * scale,
-    rewardY: -92 * scale,
+    bestY: (kind === 'result' ? 52 : 8) * scale,
+    rewardY: (kind === 'result' ? -48 : -92) * scale,
   };
 }
 

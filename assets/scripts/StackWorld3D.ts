@@ -11,14 +11,13 @@ import {
   Node,
   PhysicsSystem,
   RigidBody,
-  SpriteFrame,
-  Texture2D,
   UITransform,
   Vec3,
   primitives,
   utils,
   view,
 } from 'cc';
+import { CREAM_STYLE, RGB } from './CreamStyle';
 
 export interface WorldBlockState {
   x: number;
@@ -26,23 +25,6 @@ export interface WorldBlockState {
   width: number;
   depth: number;
   level: number;
-}
-
-export interface StackWorldTheme {
-  background: SpriteFrame | null;
-  backgroundColor?: Color;
-  softToy?: boolean;
-  blockColors: readonly Color[];
-  materialTextures: readonly SpriteFrame[];
-  /** Three columns of materials; top faces in row 0, side faces in row 1. */
-  blockAtlas?: SpriteFrame | null;
-  blockAtlasOrder?: readonly number[];
-  tintAtlas?: boolean;
-  sharpEdges?: boolean;
-  outlineColor?: Color;
-  accentColor: Color;
-  roughness: number;
-  metallic: number;
 }
 
 export type DropResult = 'landed' | 'missed' | null;
@@ -59,7 +41,6 @@ const FRAGMENT_LIFETIME = 5;
 const BLOCK_VISUAL_NAME = 'BlockVisual';
 const PERFECT_PULSE_DURATION = 0.24;
 const BACKGROUND_BASE_DISTANCE = 38;
-const HOME_PRESENTATION_DISTANCE_SCALE = 1.18;
 
 /**
  * Owns the perspective camera, real meshes and Ammo rigid bodies used by the
@@ -77,18 +58,11 @@ export class StackWorld3D {
   private readonly looseNodes = new Map<Node, number>();
   private readonly perfectPulses = new Map<Node, number>();
   private readonly blockMesh: Mesh;
-  private readonly decoratedMeshes: Mesh[] = [];
-  private readonly sharpMesh: Mesh;
-  private readonly toyMesh: Mesh;
-  private toyStage: Node | null = null;
   private readonly toyMaterials = new Set<Material>();
-  private outlineMesh: Mesh | null = null;
-  private readonly blockMaterials = new Map<string, Material>();
+  private readonly blockMaterials = new Map<number, Material>();
   private readonly presentationMaterials = new Map<Material, { material: Material; color: Color }>();
   private presentationOpacity = 1;
   private readonly ownedMaterials = new Set<Material>();
-  private backgroundMaterial: Material | null = null;
-  private theme: StackWorldTheme | null = null;
   private droppingBlock: WorldBlockState | null = null;
   private droppingNode: Node | null = null;
   private dropCollider: BoxCollider | null = null;
@@ -106,19 +80,7 @@ export class StackWorld3D {
     const scene = canvasNode.scene;
     this.worldRoot = new Node('StackWorld3D');
     this.worldRoot.layer = DEFAULT_LAYER;
-    const box = primitives.box();
-    box.colors = [];
-    for (let i = 0; i < box.normals!.length; i += 3) {
-      const [nx, ny, nz] = box.normals!.slice(i, i + 3);
-      const shade = ny > 0.5 ? 1 : nz > 0.5 ? 0.86 : nx > 0.5 ? 0.74 : ny < -0.5 ? 0.5 : 0.66;
-      box.colors.push(shade, shade, shade, 1);
-    }
-    this.blockMesh = utils.createMesh(box);
-    this.sharpMesh = utils.createMesh(this.decoratedBlockGeometry(0, true));
-    this.toyMesh = utils.createMesh(this.decoratedBlockGeometry(0, false, true));
-    for (let variant = 0; variant < 3; variant += 1) {
-      this.decoratedMeshes.push(utils.createMesh(this.decoratedBlockGeometry(variant)));
-    }
+    this.blockMesh = utils.createMesh(this.creamBlockGeometry());
     if (scene) {
       scene.addChild(this.worldRoot);
     }
@@ -138,15 +100,27 @@ export class StackWorld3D {
     this.camera.priority = -10;
     this.camera.visibility = DEFAULT_LAYER;
     this.camera.clearFlags = Camera.ClearFlag.SOLID_COLOR;
-    this.camera.clearColor = new Color(217, 231, 229, 255);
+    this.camera.clearColor = new Color(...CREAM_STYLE.backgroundColor);
 
-    this.backgroundNode = new Node('ThemeBackground3D');
+    this.backgroundNode = new Node('CreamBackground3D');
+    // Bind a material before activation so the first frame cannot flash purple.
+    this.backgroundNode.active = false;
     this.backgroundNode.layer = DEFAULT_LAYER;
     this.cameraNode.addChild(this.backgroundNode);
     this.backgroundNode.setPosition(0, 0, -BACKGROUND_BASE_DISTANCE);
     this.backgroundNode.setScale(23, 39, 0.04);
     this.backgroundRenderer = this.backgroundNode.addComponent(MeshRenderer);
     this.backgroundRenderer.mesh = utils.createMesh(primitives.box());
+    const background = new Material('StackBackground3D');
+    background.initialize({ effectName: 'builtin-unlit' });
+    background.setProperty('mainColor', new Color(...CREAM_STYLE.backgroundColor));
+    this.backgroundRenderer.setMaterial(background, 0);
+    this.ownedMaterials.add(background);
+    this.backgroundNode.active = true;
+    for (let level = 0; level < CREAM_STYLE.blockPalette.length; level += 1) {
+      this.materialForLevel(level);
+    }
+    this.createToyStage();
 
     const lightNode = new Node('KeyLight');
     lightNode.layer = DEFAULT_LAYER;
@@ -176,44 +150,6 @@ export class StackWorld3D {
     PhysicsSystem.instance.fixedTimeStep = 1 / 60;
     PhysicsSystem.instance.maxSubSteps = 3;
     this.updateCameraTransform(0, 0);
-  }
-
-  setTheme(theme: StackWorldTheme): void {
-    const retiredMaterials = Array.from(this.ownedMaterials);
-    this.ownedMaterials.clear();
-    this.theme = theme;
-    this.blockMaterials.clear();
-    this.presentationMaterials.clear();
-
-    const background = new Material('StackBackground3D');
-    const hasBackground = !!theme.background?.texture;
-    background.initialize({
-      effectName: 'builtin-unlit',
-      defines: hasBackground ? { USE_TEXTURE: true } : undefined,
-    });
-    background.setProperty('mainColor', hasBackground ? Color.WHITE : theme.backgroundColor ?? Color.WHITE);
-    if (hasBackground) {
-      background.setProperty('mainTexture', theme.background!.texture);
-    }
-    this.backgroundRenderer.setMaterial(background, 0);
-    this.backgroundMaterial = background;
-    this.ownedMaterials.add(background);
-    this.updateBackdropTransform();
-    if (theme.softToy && !this.toyStage) this.createToyStage();
-    if (this.toyStage) this.toyStage.active = !!theme.softToy;
-    this.updateCameraTransform(0, 0);
-
-    for (const [block, node] of this.blockNodes) {
-      this.applyBlockMaterial(node, block.level);
-    }
-    for (const node of this.looseNodes.keys()) {
-      const level = Number(node.name.split('-').pop()) || 0;
-      this.applyBlockMaterial(node, level);
-    }
-    // Release only after all renderers have switched to the replacement assets.
-    for (const material of retiredMaterials) {
-      material.destroy();
-    }
   }
 
   sync(stack: readonly WorldBlockState[], current: WorldBlockState | null): void {
@@ -421,7 +357,7 @@ export class StackWorld3D {
     PhysicsSystem.instance.enable = !paused;
   }
 
-  /** Render-only fade: the theme background, rigid bodies and camera stay intact. */
+  /** Render-only fade: the cream background, rigid bodies and camera stay intact. */
   setPresentationOpacity(opacity: number): void {
     const next = Number.isFinite(opacity) ? Math.max(0, Math.min(1, opacity)) : 1;
     if (next === this.presentationOpacity) return;
@@ -443,16 +379,14 @@ export class StackWorld3D {
     if (this.presentationOpacity === 1) return opaque;
     let entry = this.presentationMaterials.get(opaque);
     if (!entry) {
-      const texture = opaque.getProperty('mainTexture') as Texture2D | null;
       const color = opaque.getProperty('mainColor') as Color;
       const material = new Material('StackPresentationFade');
       // Built-in transparent technique; shared/cached per original material,
       // never a full-screen pass and never a material allocation per frame.
       material.initialize({
         effectName: 'builtin-unlit', technique: 1,
-        defines: { USE_VERTEX_COLOR: opaque !== this.blockMaterials.get('outline'), USE_TEXTURE: !!texture },
+        defines: { USE_VERTEX_COLOR: true },
       });
-      if (texture) material.setProperty('mainTexture', texture);
       material.setProperty('mainColor', new Color(color.r, color.g, color.b, Math.round(color.a * this.presentationOpacity)));
       entry = { material, color };
       this.presentationMaterials.set(opaque, entry);
@@ -495,21 +429,14 @@ export class StackWorld3D {
     this.worldRoot.active = false;
     this.backgroundRenderer.mesh?.destroy();
     this.blockMesh.destroy();
-    for (const mesh of this.decoratedMeshes) {
-      mesh.destroy();
-    }
-    this.sharpMesh.destroy();
-    this.toyMesh.destroy();
     for (const material of this.toyMaterials) material.destroy();
     this.toyMaterials.clear();
-    this.outlineMesh?.destroy();
     for (const material of this.ownedMaterials) {
       material.destroy();
     }
     this.blockMaterials.clear();
     this.ownedMaterials.clear();
     this.presentationMaterials.clear();
-    this.backgroundMaterial = null;
     this.worldRoot.destroy();
   }
 
@@ -559,96 +486,27 @@ export class StackWorld3D {
   private applyBlockMaterial(node: Node, level: number): void {
     const renderer = this.blockVisual(node).getComponent(MeshRenderer);
     if (renderer) {
-      const order = this.theme?.blockAtlasOrder;
-      const variant = order?.length ? order[Math.abs(level) % order.length] : Math.abs(level) % 3;
-      renderer.mesh = this.theme?.softToy ? this.toyMesh : this.theme?.blockAtlas?.texture
-        ? (this.theme.sharpEdges ? this.sharpMesh : this.decoratedMeshes[variant])
-        : this.blockMesh;
+      renderer.mesh = this.blockMesh;
       renderer.setMaterial(this.presentationMaterial(this.materialForLevel(level)), 0);
     }
     const visual = this.blockVisual(node);
     visual.active = this.presentationOpacity > 0;
-    let outline = visual.getChildByName('ThemeOutline');
-    if (!this.theme?.outlineColor) {
-      if (outline) outline.active = false;
-      return;
-    }
-    if (!outline) {
-      outline = new Node('ThemeOutline');
-      outline.layer = DEFAULT_LAYER;
-      visual.addChild(outline);
-      outline.addComponent(MeshRenderer);
-    }
-    outline.active = true;
-    if (!this.outlineMesh) this.outlineMesh = utils.createMesh(this.blockOutlineGeometry());
-    let material = this.blockMaterials.get('outline');
-    if (!material) {
-      material = new Material('BlockOutline');
-      material.initialize({ effectName: 'builtin-unlit' });
-      material.setProperty('mainColor', this.theme.outlineColor);
-      this.blockMaterials.set('outline', material);
-      this.ownedMaterials.add(material);
-    }
-    const edges = outline.getComponent(MeshRenderer);
-    edges.mesh = this.outlineMesh;
-    edges.setMaterial(this.presentationMaterial(material), 0);
-  }
-
-  private blockOutlineGeometry() {
-    // Twelve narrow solid edge strips, combined into one shared mesh. They sit
-    // over the bevel, so no coplanar white seam or transparent sorting is needed.
-    const cube = this.decoratedBlockGeometry(0, true);
-    const positions: number[] = [];
-    const normals: number[] = [];
-    const indices: number[] = [];
-    const add = (center: number[], size: number[]) => {
-      const offset = positions.length / 3;
-      cube.positions.forEach((value, i) => positions.push(value * size[i % 3] + center[i % 3]));
-      normals.push(...cube.normals);
-      indices.push(...cube.indices.map(index => index + offset));
-    };
-    for (const a of [-1, 1]) {
-      for (const b of [-1, 1]) {
-        add([0, a * 0.49, b * 0.492], [0.992, 0.026, 0.014]);
-        add([a * 0.492, b * 0.49, 0], [0.014, 0.026, 0.992]);
-        add([a * 0.492, 0, b * 0.492], [0.014, 0.992, 0.014]);
-      }
-    }
-    return { positions, normals, indices };
   }
 
   private materialForLevel(level: number): Material {
-    const theme = this.theme;
-    const atlas = theme?.blockAtlas;
-    const colorCount = Math.max(1, theme?.blockColors.length ?? 1);
-    const textureCount = Math.max(1, theme?.materialTextures.length ?? 1);
-    const colorIndex = Math.abs(level) % colorCount;
-    const textureIndex = Math.abs(level) % textureCount;
-    const materialKey = atlas?.texture ? (theme?.tintAtlas ? `tinted-atlas:${colorIndex}` : 'decorated-atlas') : `${colorIndex}:${textureIndex}`;
-    const cached = this.blockMaterials.get(materialKey);
+    const colorIndex = Math.abs(level) % CREAM_STYLE.blockPalette.length;
+    const cached = this.blockMaterials.get(colorIndex);
     if (cached) {
       return cached;
     }
 
-    const textureFrame = atlas?.texture ? atlas : (theme?.materialTextures.length
-      ? theme.materialTextures[textureIndex]
-      : null);
-    const material = new Material(`StackBlockMaterial-${level}`);
+    const material = new Material(`StackBlockMaterial-${colorIndex}`);
     material.initialize({
       effectName: 'builtin-unlit',
-      defines: {
-        USE_VERTEX_COLOR: true,
-        USE_TEXTURE: !!textureFrame?.texture,
-      },
+      defines: { USE_VERTEX_COLOR: true },
     });
-    const colors = theme?.blockColors ?? [Color.WHITE];
-    const color = colors[colorIndex] ?? Color.WHITE;
-    // Authored glaze/wood colors are already baked into the atlas.
-    material.setProperty('mainColor', atlas?.texture && !theme?.tintAtlas ? Color.WHITE : color);
-    if (textureFrame?.texture) {
-      material.setProperty('mainTexture', textureFrame.texture);
-    }
-    this.blockMaterials.set(materialKey, material);
+    material.setProperty('mainColor', new Color(...CREAM_STYLE.blockPalette[colorIndex]));
+    this.blockMaterials.set(colorIndex, material);
     this.ownedMaterials.add(material);
     return material;
   }
@@ -658,9 +516,8 @@ export class StackWorld3D {
     const root = new Node('CreamToyStage');
     root.layer = DEFAULT_LAYER;
     this.worldRoot.addChild(root);
-    this.toyStage = root;
     const materials = new Map<string, Material>();
-    const part = (name: string, position: number[], size: number[], rgb: number[], solid = false) => {
+    const part = (name: string, position: number[], size: number[], rgb: RGB, solid = false) => {
       const key = rgb.join(',');
       let material = materials.get(key);
       if (!material) {
@@ -676,7 +533,7 @@ export class StackWorld3D {
       node.setPosition(position[0], position[1], position[2]);
       node.setScale(size[0], size[1], size[2]);
       const renderer = node.addComponent(MeshRenderer);
-      renderer.mesh = this.toyMesh;
+      renderer.mesh = this.blockMesh;
       renderer.setMaterial(material, 0);
       if (solid) {
         // Match the rendered dimensions through node scale. Stage props stay
@@ -688,12 +545,12 @@ export class StackWorld3D {
         collider.size = Vec3.ONE;
       }
     };
-    part('TableShadow', [0.18, -0.64, 0.2], [9.6, 0.08, 9.6], [181, 156, 150]);
-    part('RoseTableEdge', [0, -0.42, 0], [9.2, 0.36, 9.2], [223, 175, 181]);
-    part('CreamTableTop', [0, -0.2, 0], [9.2, 0.12, 9.2], [247, 232, 193]);
-    part('TowerPlinth', [0, -0.06, 0], [5.55, 0.16, 5.55], [224, 210, 191], true);
+    part('TableShadow', [0.18, -0.64, 0.2], [9.6, 0.08, 9.6], CREAM_STYLE.stageShadow);
+    part('RoseTableEdge', [0, -0.42, 0], [9.2, 0.36, 9.2], CREAM_STYLE.tableEdge);
+    part('CreamTableTop', [0, -0.2, 0], [9.2, 0.12, 9.2], CREAM_STYLE.tableTop);
+    part('TowerPlinth', [0, -0.06, 0], [5.55, 0.16, 5.55], CREAM_STYLE.plinth, true);
     // One thick static box covers the cream surface and pink edge. Its top is
-    // exactly y = -0.14; it follows the stage's theme visibility and lifetime.
+    // exactly y = -0.14; it follows the stage's visibility and lifetime.
     const table = new Node('TableCollision');
     table.layer = DEFAULT_LAYER;
     root.addChild(table);
@@ -704,24 +561,23 @@ export class StackWorld3D {
     const tableCollider = table.addComponent(BoxCollider);
     tableCollider.size = new Vec3(9.2, 0.46, 9.2);
     const toys = [
-      [-3.6, -2.9, 0.56, 153, 199, 199], [3.5, -2.8, 0.65, 197, 177, 208],
-      [-3.6, 1.8, 0.85, 179, 211, 178], [3.6, 1.2, 0.78, 225, 175, 180],
-      [-1.5, 3.65, 0.42, 222, 217, 153], [1.65, 3.65, 0.65, 236, 200, 161],
+      [-3.6, -2.9, 0.56, 0], [3.5, -2.8, 0.65, 5],
+      [-3.6, 1.8, 0.85, 1], [3.6, 1.2, 0.78, 4],
+      [-1.5, 3.65, 0.42, 2], [1.65, 3.65, 0.65, 3],
     ];
-    toys.forEach(([x, z, h, r, g, b], i) => {
-      part(`PastelToy-${i}`, [x, -0.14 + h / 2, z], [0.62, h, 0.62], [r, g, b], true);
-      part(`ToyInlay-${i}`, [x, h * 0.42 - 0.14, z + 0.313], [0.38, 0.035, 0.008], [251, 240, 207]);
+    toys.forEach(([x, z, h, colorIndex], i) => {
+      part(`PastelToy-${i}`, [x, -0.14 + h / 2, z], [0.62, h, 0.62], CREAM_STYLE.blockPalette[colorIndex], true);
+      part(`ToyInlay-${i}`, [x, h * 0.42 - 0.14, z + 0.313], [0.38, 0.035, 0.008], CREAM_STYLE.toyInlay);
     });
   }
 
-  private decoratedBlockGeometry(variant: number, sharp = false, soft = false) {
+  private creamBlockGeometry() {
     const positions: number[] = [];
     const normals: number[] = [];
-    const uvs: number[] = [];
     const colors: number[] = [];
     const indices: number[] = [];
-    // A 0.06-world-unit bevel at the initial 5 x 0.62 x 5 block size.
-    const inner = sharp ? [0.5, 0.5, 0.5] : soft ? [0.47, 0.37, 0.47] : [0.488, 0.41, 0.488];
+    // Broad, softly shaded bevels give every solid a painted wooden-toy finish.
+    const inner = [0.47, 0.37, 0.47];
     const addFace = (points: number[][], normal: number[]) => {
       const a = points[1].map((value, i) => value - points[0][i]);
       const b = points[2].map((value, i) => value - points[0][i]);
@@ -729,7 +585,6 @@ export class StackWorld3D {
       if (cross.reduce((sum, value, i) => sum + value * normal[i], 0) < 0) points.reverse();
       const length = Math.hypot(...normal);
       const n = normal.map(value => value / length);
-      const top = n[1] > 0.5;
       const shade = Math.min(1, 0.66 + Math.max(0, n[1]) * 0.34
         + Math.max(0, n[0]) * 0.08 + Math.max(0, n[2]) * 0.17);
       const start = positions.length / 3;
@@ -737,11 +592,6 @@ export class StackWorld3D {
         positions.push(...point);
         normals.push(...n);
         colors.push(shade, shade, shade, 1);
-        const u = top ? point[0] + 0.5
-          : (Math.abs(n[0]) > Math.abs(n[2]) ? point[2] : point[0]) + 0.5;
-        const v = top ? 0.5 - point[2] : 0.5 - point[1];
-        // Inset each tile by two pixels to prevent neighboring colors bleeding.
-        uvs.push((variant + (2 + u * 508) / 512) / 3, ((top ? 0 : 1) + (2 + v * 508) / 512) / 2);
       }
       for (let i = 1; i < points.length - 1; i += 1) indices.push(start, start + i, start + i + 1);
     };
@@ -756,9 +606,6 @@ export class StackWorld3D {
           point[a] = sa * inner[a]; point[b] = sb * inner[b]; return point;
         }), normal);
       }
-    }
-    if (sharp) {
-      return { positions, normals, uvs, colors, indices, minPos: new Vec3(-0.5, -0.5, -0.5), maxPos: new Vec3(0.5, 0.5, 0.5) };
     }
     for (let a = 0; a < 3; a += 1) {
       for (let b = a + 1; b < 3; b += 1) {
@@ -777,7 +624,7 @@ export class StackWorld3D {
       const signs = [sx, sy, sz];
       addFace([0, 1, 2].map(axis => signs.map((sign, i) => sign * (i === axis ? 0.5 : inner[i]))), signs);
     }
-    return { positions, normals, uvs, colors, indices, minPos: new Vec3(-0.5, -0.5, -0.5), maxPos: new Vec3(0.5, 0.5, 0.5) };
+    return { positions, normals, colors, indices, minPos: new Vec3(-0.5, -0.5, -0.5), maxPos: new Vec3(0.5, 0.5, 0.5) };
   }
 
   private blockVisual(node: Node): Node {
@@ -871,10 +718,9 @@ export class StackWorld3D {
     const sx = shakeX * 0.012;
     const sy = shakeY * 0.012;
     const overviewScale = this.cameraOverviewScale()
-      * (this.homePresentation ? (this.theme?.softToy ? 1.36 : HOME_PRESENTATION_DISTANCE_SCALE)
-        : this.theme?.softToy ? 1.08 : 1);
+      * (this.homePresentation ? 1.36 : 1.08);
     // The home still life includes the whole tabletop, not just the tower top.
-    const focusY = this.cameraCurrentY - (this.homePresentation && this.theme?.softToy ? 0.85 : 0);
+    const focusY = this.cameraCurrentY - (this.homePresentation ? 0.85 : 0);
     const target = new Vec3(this.compositionOffsetX, focusY, 0);
     this.cameraNode.setPosition(
       10.8 * overviewScale + this.compositionOffsetX + sx,
@@ -890,16 +736,12 @@ export class StackWorld3D {
     // still cover the camera without advancing physics, pulses or debris.
     const visible = view.getVisibleSize();
     const viewportAspect = visible.width / Math.max(1, visible.height);
-    const imageAspect = this.theme?.background?.rect
-      ? this.theme.background.rect.width / this.theme.background.rect.height
-      : viewportAspect;
     // The backdrop is camera-local. Move it with the overview camera so tall
     // towers never pass behind it when the camera pulls back.
     const backgroundDistance = BACKGROUND_BASE_DISTANCE * this.cameraOverviewScale();
     this.backgroundNode.setPosition(0, 0, -backgroundDistance);
     const height = 2 * backgroundDistance * Math.tan(this.camera.fov * Math.PI / 360);
-    const coverHeight = Math.max(height, height * viewportAspect / imageAspect);
-    this.backgroundNode.setScale(coverHeight * imageAspect, coverHeight, 0.04);
+    this.backgroundNode.setScale(height * viewportAspect, height, 0.04);
   }
 
   private cameraOverviewScale(): number {

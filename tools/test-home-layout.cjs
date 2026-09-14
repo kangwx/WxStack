@@ -90,7 +90,7 @@ class Color {
   static WHITE = new Color();
 }
 const cc = {
-  _decorator: { ccclass: () => Type => Type }, Component: class {},
+  _decorator: { ccclass: () => Type => Type }, Component: class { schedule() {} unschedule() {} },
   Node, UITransform, Button, EditBox, Label, Color, ScrollView,
   MaskComponent: class { static Type = { GRAPHICS_RECT: 0 }; },
   Vec2: class { constructor(x, y) { Object.assign(this, { x, y }); } },
@@ -123,9 +123,13 @@ function loadPlainModule(name) {
 }
 const loadLayoutModule = () => loadPlainModule('ProjectorLayout');
 const leaderboardData = loadPlainModule('Leaderboard');
+const { CREAM_STYLE } = loadPlainModule('CreamStyle');
 const sandbox = { exports: {}, require: id => id === 'cc' ? cc
   : id === './ProjectorLayout' ? loadLayoutModule()
-  : id === './Leaderboard' ? leaderboardData : {} };
+  : id === './Leaderboard' ? leaderboardData
+  : id === './ReviveClient' ? loadPlainModule('ReviveClient')
+  : id === './Stamina' ? loadPlainModule('Stamina')
+  : id === './CreamStyle' ? { CREAM_STYLE } : {} };
 vm.runInNewContext(compiled, sandbox);
 const GamePrototype = sandbox.exports.StackGame.prototype;
 
@@ -184,15 +188,14 @@ for (const [width, height] of [...frames, [320, 568], [360, 800]]) {
     cc.screen.windowSize = { width, height };
     let layouts = 0;
     Object.assign(game, {
-      node: canvas, phase: 'ready', natureTextureBlocks: [],
+      node: canvas, phase: 'ready',
       controlsLabel: { node: new Node('Controls') }, precisionTipLabel: { node: new Node('Precision') },
-      skinsCloseButton: { label: new Label() },
       applyResponsiveLayout() {
         layouts += 1;
         assert.equal(canvas.position.x, visible.width / 2, 'root centering happens before descendant layout');
         assert.equal(canvas.position.y, visible.height / 2);
       },
-      updateWorldComposition() {}, updateAudioPrompt() {}, applyThemeToUI() {},
+      updateWorldComposition() {}, updateAudioPrompt() {}, applyCreamStyleToUI() {},
     });
     game.resizeStage();
     assert.equal(layouts, 1);
@@ -304,7 +307,7 @@ test('the developer test toggle belongs to settings and is absent from the home 
   assert.equal(game.startGroup.children.length, 0);
 });
 
-test('settings remote navigation visits sound, reduced motion, test mode, nickname, then return and wraps both ways', () => {
+test('settings remote navigation visits sound, reduced motion, test mode, nickname, restore stamina, then return and wraps both ways', () => {
   const game = gameFor(1920, 1080);
   const activated = [];
   const focused = [];
@@ -314,29 +317,29 @@ test('settings remote navigation visits sound, reduced motion, test mode, nickna
     toggleMotionSetting: () => activated.push('motion'),
     toggleTestMode: () => activated.push('test'),
     openNicknameEditor: () => activated.push('nickname'),
+    onRestoreStamina: () => activated.push('restore'),
     closeHomeOverlay: () => activated.push('return'),
     updateSettingsUI() { focused.push(this.settingsSelection); },
   });
-  for (let index = 0; index < 5; index += 1) {
+  for (let index = 0; index < 6; index += 1) {
     game.activateSettingsSelection();
     game.moveSettingsSelection(1);
   }
-  assert.deepEqual(activated, ['sound', 'motion', 'test', 'nickname', 'return']);
-  assert.deepEqual(focused, [1, 2, 3, 4, 0]);
+  assert.deepEqual(activated, ['sound', 'motion', 'test', 'nickname', 'restore', 'return']);
+  assert.deepEqual(focused, [1, 2, 3, 4, 5, 0]);
   activated.length = 0;
   focused.length = 0;
-  for (let index = 0; index < 5; index += 1) {
+  for (let index = 0; index < 6; index += 1) {
     game.moveSettingsSelection(-1);
     game.activateSettingsSelection();
   }
-  assert.deepEqual(activated, ['return', 'nickname', 'test', 'motion', 'sound']);
-  assert.deepEqual(focused, [4, 3, 2, 1, 0]);
+  assert.deepEqual(activated, ['return', 'restore', 'nickname', 'test', 'motion', 'sound']);
+  assert.deepEqual(focused, [5, 4, 3, 2, 1, 0]);
 });
 
 function makeHomeFixture(width, height) {
   const game = gameFor(width, height);
   game.startGroup = new Node('StartScreen');
-  game.selectedSkinId = 'minimal-stack';
   game.homeOverlay = 'none';
   game.phase = 'ready';
   game.homeLeaderboardPreviewRows = [];
@@ -359,12 +362,26 @@ function makeHomeFixture(width, height) {
   }
   game.homeBestBadge = game.makeNode('HomeBestBadge', game.startGroup);
   game.homeBestBadge.addComponent(UITransform);
-  for (const key of ['homeBestCaption', 'homeBestLabel', 'homeCoinCaption', 'homeCoinLabel', 'controlsLabel', 'precisionTipLabel']) {
+  for (const key of ['homeBestCaption', 'homeBestLabel', 'homeCoinCaption', 'homeCoinLabel', 'homeStaminaLabel', 'controlsLabel', 'precisionTipLabel']) {
     game[key] = game.makeLabel(key, game.startGroup, key, 30, new Color(), 100, 50);
   }
   game.buildHomeLeaderboardPreview();
   return game;
 }
+
+test('stamina status fits between the home stats and start button across preview sizes', () => {
+  for (const [width, height] of frames) {
+    const game = makeHomeFixture(width, height);
+    game.applyHomeLayout();
+    const layout = game.homeLayout();
+    const label = game.homeStaminaLabel;
+    const rect = label.node.getComponent(UITransform);
+    assert.ok(label.node.position.y + rect.height / 2 <= layout.statsY - layout.statsHeight / 2 + 0.001);
+    assert.ok(label.node.position.y - rect.height / 2 >= layout.startY + layout.buttonHeight / 2 - 0.001);
+    assert.ok(rect.height >= label.lineHeight, `${width}x${height}: countdown remains readable`);
+    assert.ok(rect.width <= layout.contentWidth);
+  }
+});
 
 test('responsive button hit regions, rendered backgrounds, and single-column focus use the same dimensions', () => {
   for (const [width, height] of frames) {
@@ -427,13 +444,13 @@ test('the right home preview is a real button whose click handler is attached an
   for (const name of ['testModeToggle', 'pauseButton', 'resumeButton', 'restartButton', 'homeButton']) {
     game[name] = new Node(name);
   }
-  for (const name of ['resultHomeButton', 'resultRestartButton', 'soundToggle', 'motionToggle', 'settingsCloseButton', 'skinsCloseButton',
+  for (const name of ['resultHomeButton', 'resultRestartButton', 'resultReviveButton', 'reviveCloseButton', 'soundToggle', 'motionToggle', 'restoreStaminaButton', 'settingsCloseButton',
     'nicknameButton', 'nicknameSaveButton', 'nicknameCancelButton']) {
     game[name] = { node: new Node(name) };
   }
   game.nicknameEditor = new Node('NicknameInput').addComponent(EditBox);
   Object.assign(game, {
-    graphics: { node: new Node('Graphics') }, skinCards: new Map(), skinCardHandlers: new Map(),
+    graphics: { node: new Node('Graphics') },
     leaderboardButtons: [], leaderboardHandlers: [], leaderboardRequest: 0,
     heldKeys: new Set(), homeTransition: null,
   });
@@ -457,6 +474,7 @@ test('the right home preview is a real button whose click handler is attached an
   game.homeLeaderboardPreview.emit(Button.EventType.CLICK);
   assert.deepEqual(opened, ['leaderboard'], 'disabled screens must not retain clickable handlers');
   assert.ok(game.homeLeaderboardPreviewRequest > request, 'disable invalidates pending preview responses');
+  assert.equal(game.leaderboardRequest, 1, 'disable invalidates pending leaderboard responses');
   assert.equal(game.nicknameEditor.node.events.size, 0);
   assert.equal(game.nicknameSaveButton.node.events.size, 0);
   assert.equal(game.nicknameCancelButton.node.events.size, 0);
@@ -699,7 +717,6 @@ function recordingButton(game, group, name) {
 
 function projectorFixture(width, height) {
   const game = gameFor(width, height);
-  game.selectedSkinId = 'minimal-stack';
   game.reducedMotion = false;
   game.setCenteredNodeLayout = (node, x, y) => node.setPosition(x, y, 0);
   game.setTopLeftLayout = (node, top, left) => { node.edge = { top, left }; };
@@ -728,7 +745,7 @@ function projectorFixture(width, height) {
   game.leaderboardScroll = game.leaderboardViewport.addComponent(ScrollView);
   game.leaderboardScroll.content = game.leaderboardContent;
   const buttons = {};
-  buttons.settings = ['soundToggle', 'motionToggle', 'testToggle', 'nicknameButton', 'settingsCloseButton'].map(key => {
+  buttons.settings = ['soundToggle', 'motionToggle', 'testToggle', 'nicknameButton', 'restoreStaminaButton', 'settingsCloseButton'].map(key => {
     const ui = recordingButton(game, game.settingsGroup, key);
     if (key === 'testToggle') Object.assign(game, { testModeToggle: ui.node, testModeToggleGraphics: ui.graphics, testModeToggleLabel: ui.label });
     else game[key] = ui;
@@ -740,7 +757,7 @@ function projectorFixture(width, height) {
     Object.assign(game, { [`${key}Button`]: ui.node, [`${key}ButtonGraphics`]: ui.graphics, [`${key}ButtonLabel`]: ui.label });
     return ui;
   });
-  buttons.result = ['resultRestartButton', 'resultHomeButton'].map(key => {
+  buttons.result = ['resultReviveButton', 'resultRestartButton', 'resultHomeButton'].map(key => {
     const ui = recordingButton(game, game.resultGroup, key);
     game[key] = ui;
     return ui;
@@ -929,35 +946,32 @@ test('a nickname remains usable for the current session when local storage is un
   }
 });
 
-test('nickname modal input, labels and focused Save/Cancel targets fit narrow and projector screens across themes', () => {
+test('cream nickname input, labels and focused Save/Cancel targets fit narrow and projector screens', () => {
   for (const [width, height] of [...frames, [320, 568], [360, 800]]) {
     const game = nicknameFixture(width, height);
     game.openNicknameEditor();
-    for (const skin of ['minimal-stack', 'classic', 'cyber-neon', 'porcelain-moon', 'pastel-toy', 'nature-zen']) {
-      game.selectedSkinId = skin;
-      for (const selection of [0, 1, 2]) {
-        game.nicknameSelection = selection;
-        game.updateNicknameEditorUI();
-        const panel = game.nicknameGraphics.rectangles[0];
-        assert.equal(panel.x + panel.width / 2, 0, 'dialog is centered');
-        assert.ok(panel.x >= -game.visibleWidth / 2 + 28);
-        assert.ok(panel.x + panel.width <= game.visibleWidth / 2 - 28);
-        const input = game.nicknameEditor.node.getComponent(UITransform);
-        assert.ok(input.width <= panel.width - 64);
-        assert.equal(game.nicknameEditor.node.position.x, 0);
-        for (const button of [game.nicknameSaveButton, game.nicknameCancelButton]) {
-          const box = button.node.getComponent(UITransform);
-          const focusHalf = box.width * 1.018 / 2 + 10;
-          assert.ok(button.node.position.x - focusHalf >= panel.x + 16);
-          assert.ok(button.node.position.x + focusHalf <= panel.x + panel.width - 16);
-          assert.ok(button.node.position.y - box.height * 1.018 / 2 - 10 >= panel.y + 16);
-        }
-        for (const label of [game.nicknameEditor.textLabel, game.nicknameHint]) {
-          assert.ok(contrast(label.color, game.currentSkin().panelColor) >= 4.5);
-        }
-        assert.equal(game.nicknameEditor.textLabel.horizontalAlign, Label.HorizontalAlign.LEFT);
-        assert.deepEqual(game.nicknameEditor.textLabel.node.getComponent(UITransform).anchorPoint, { x: 0, y: 1 });
+    for (const selection of [0, 1, 2]) {
+      game.nicknameSelection = selection;
+      game.updateNicknameEditorUI();
+      const panel = game.nicknameGraphics.rectangles[0];
+      assert.equal(panel.x + panel.width / 2, 0, 'dialog is centered');
+      assert.ok(panel.x >= -game.visibleWidth / 2 + 28);
+      assert.ok(panel.x + panel.width <= game.visibleWidth / 2 - 28);
+      const input = game.nicknameEditor.node.getComponent(UITransform);
+      assert.ok(input.width <= panel.width - 64);
+      assert.equal(game.nicknameEditor.node.position.x, 0);
+      for (const button of [game.nicknameSaveButton, game.nicknameCancelButton]) {
+        const box = button.node.getComponent(UITransform);
+        const focusHalf = box.width * 1.018 / 2 + 10;
+        assert.ok(button.node.position.x - focusHalf >= panel.x + 16);
+        assert.ok(button.node.position.x + focusHalf <= panel.x + panel.width - 16);
+        assert.ok(button.node.position.y - box.height * 1.018 / 2 - 10 >= panel.y + 16);
       }
+      for (const label of [game.nicknameEditor.textLabel, game.nicknameHint]) {
+        assert.ok(contrast(label.color, CREAM_STYLE.panelColor) >= 4.5);
+      }
+      assert.equal(game.nicknameEditor.textLabel.horizontalAlign, Label.HorizontalAlign.LEFT);
+      assert.deepEqual(game.nicknameEditor.textLabel.node.getComponent(UITransform).anchorPoint, { x: 0, y: 1 });
     }
   }
 });
@@ -1064,7 +1078,7 @@ function roundFixture(bestScore, playerNickname = leaderboardData.DEFAULT_NICKNA
   const { game } = projectorFixture(390, 844);
   Object.assign(game, {
     bestScore, coins: 0, homeOverlay: 'none', playerNickname,
-    startGroup: new Node('StartScreen'), skinsGroup: new Node('SkinsScreen'),
+    startGroup: new Node('StartScreen'),
     world3D: { reset() {} },
     resetPerfectFeedback() {}, updateWorldComposition() {}, playSound() {},
     recordLeaderboardResult() {}, saveBestScore() {}, saveEconomy() {},
@@ -1185,32 +1199,9 @@ test('ranking construction uses a masked native scroll viewport, ten reusable ro
   assert.equal(game.leaderboardViewport.events.get(ScrollView.EventType.SCROLLING).callback, GamePrototype.updateLeaderboardScrollTrack);
 });
 
-test('alternate-skin leaderboard keeps readable gold titles and layered medals on dark panels', () => {
-  const { game } = projectorFixture(1920, 1080);
-  game.selectedSkinId = 'classic';
-  game.homeOverlay = 'leaderboard';
-  game.leaderboardEntries = [700, 600, 500, 350].map((score, i) => ({ id: `design-${i}`, kind: 'round',
-    nickname: '叠叠玩家', score, perfectCount: 3, finishedAt: 1700000000000 }));
-  game.submittedRoundId = 'design-0';
-  game.updateLeaderboardUI();
-  for (const row of game.leaderboardRows.slice(0, 4)) {
-    for (const background of [[39, 83, 87], [28, 65, 69], [48, 99, 101]]) {
-      for (const label of [row.player, row.title, row.score, row.detail]) {
-        assert.ok(contrast(label.color, background) >= 4.5, 'row text stays readable on all gradient stops');
-      }
-    }
-    assert.equal(row.title.isBold, true);
-  }
-  assert.ok(game.leaderboardRows.slice(0, 3).every(row => row.graphics.rectangles.filter(shape => shape.circle).length >= 4));
-  assert.equal(game.leaderboardRows[3].graphics.rectangles.some(shape => shape.circle), true, 'every rank has a tier avatar');
-  assert.equal(game.leaderboardButtons[0].graphics.rectangles.length, 0, 'close is a mint cross, not a filled menu button');
-  assert.equal(game.leaderboardRows[0].player.string, '叠叠玩家 · 本局');
-});
-
 test('cream leaderboard retains readable text on normal and highlighted pastel rows', () => {
   for (const [width, height] of [[750, 1334], [1440, 1080], [1920, 1080], [3440, 1440]]) {
     const { game } = projectorFixture(width, height);
-    game.selectedSkinId = 'minimal-stack';
     game.homeOverlay = 'leaderboard';
     game.leaderboardEntries = [700, 500, 350, 0].map((score, i) => ({ id: `pastel-${i}`, kind: 'round',
       nickname: '十二个字昵称完整显示测试中', score, perfectCount: 3, finishedAt: 1700000000000 }));
@@ -1224,6 +1215,11 @@ test('cream leaderboard retains readable text on normal and highlighted pastel r
       }
     }
     assert.equal(game.leaderboardRows[0].title.string, '王者 +2 星');
+    assert.ok(game.leaderboardRows.slice(0, 3).every(row => row.graphics.rectangles.filter(shape => shape.circle).length >= 4));
+    assert.equal(game.leaderboardRows[3].graphics.rectangles.some(shape => shape.circle), true, 'every rank has a tier avatar');
+    assert.equal(game.leaderboardButtons[0].graphics.rectangles.length, 0, 'close remains a line cross');
+    assert.equal(game.leaderboardRows[0].player.string, '十二个字昵称完整显示测试中 · 本局');
+    assert.ok(game.leaderboardRows.slice(0, 4).every(row => row.title.isBold));
   }
 });
 
@@ -1231,7 +1227,7 @@ test('returning to the ready screen refreshes the leaderboard preview once after
   const game = roundFixture(20);
   let loads = 0;
   Object.assign(game, {
-    updateCoinLabels() {}, updateAudioPrompt() {}, applyThemeToUI() {}, drawFrame() {},
+    updateCoinLabels() {}, updateAudioPrompt() {}, applyCreamStyleToUI() {}, drawFrame() {},
     loadHomeLeaderboardPreview() {
       loads += 1;
       assert.equal(this.phase, 'ready');
@@ -1281,6 +1277,21 @@ test('first and improved records become the next round target only after settlem
   }
 });
 
+test('a second failure after revival awards only newly earned perfect coins', () => {
+  const game = roundFixture(20);
+  game.score = 5; game.roundPerfectCount = 3;
+  game.showResultScreen();
+  assert.equal(game.coins, 3);
+  game.reviveUsed = true; game.phase = 'falling';
+  game.score = 8; game.roundPerfectCount = 5;
+  game.showResultScreen();
+  assert.equal(game.coins, 5);
+  assert.equal(game.lastEarnedCoins, 2);
+  game.showResultScreen();
+  assert.equal(game.coins, 5);
+  assert.equal(game.resultSelection, 1, 'after one revival focus defaults to restart');
+});
+
 test('zero-score rounds hide the hint on results and restore the right opening message on restart', () => {
   for (const [bestScore, expected] of [[0, '创造你的首个纪录'], [20, '距最高还差 20 层']]) {
     const game = roundFixture(bestScore);
@@ -1315,7 +1326,6 @@ test('test rounds never show a record hint, including a remembered test-round fl
 test('all projector screen buttons share homepage focus drawing and their real hit rectangle', () => {
   for (const [width, height] of frames) {
     const game = gameFor(width, height);
-    game.selectedSkinId = 'minimal-stack';
     game.reducedMotion = false;
     // A legacy TV flag must no longer introduce another multiplier.
     game.tvLayout = true;
@@ -1354,13 +1364,14 @@ test('pause and result focus route the shared layout dimensions to the selected 
       game[`${name}ButtonLabel`] = ui.label;
       return ui;
     });
+    game.resultReviveButton = recordingButton(game, group, 'result-revive');
     game.resultRestartButton = recordingButton(game, group, 'result-restart');
     game.resultHomeButton = recordingButton(game, group, 'result-home');
     const draws = [];
     game.drawOverlayButton = (ui, drawWidth, drawHeight, selected) => draws.push({ ui, drawWidth, drawHeight, selected });
     for (const kind of ['pause', 'result']) {
       const layout = game.panelLayout(kind);
-      const buttons = kind === 'pause' ? pauseButtons : [game.resultRestartButton, game.resultHomeButton];
+      const buttons = kind === 'pause' ? pauseButtons : [game.resultReviveButton, game.resultRestartButton, game.resultHomeButton];
       for (let selected = 0; selected < buttons.length; selected += 1) {
         draws.length = 0;
         game[`${kind}Selection`] = selected;
@@ -1381,7 +1392,6 @@ test('pause and result focus route the shared layout dimensions to the selected 
 test('settings state pills remain distinct from their caption and share button focus contrast', () => {
   for (const [width, height] of frames) {
     const game = gameFor(width, height);
-    game.selectedSkinId = 'minimal-stack';
     game.reducedMotion = false;
     const layout = game.panelLayout('settings');
     const ui = recordingButton(game, new Node('Settings'), 'Toggle');
@@ -1420,7 +1430,7 @@ test('pause hides the entire gameplay HUD and resume restores the prior phase wi
           world3D: { setPaused(value) { paused.push(value); } },
           updateWorldComposition() { compositions.push(this.phase); },
           resetPerfectFeedback() { feedbackResets += 1; },
-          // Theme/UI redraws while paused must not re-enable the test badge.
+          // UI redraws while paused must not re-enable the test badge.
           drawFrame() { this.updateTestModeUI(); },
           consumeActionDebounce: () => true,
           placeCurrentBlock() { placed += 1; },
@@ -1477,62 +1487,53 @@ test('pause hides the entire gameplay HUD and resume restores the prior phase wi
   }
 });
 
-test('every current theme supplies high-contrast home, preview and record-hint text with a visible focus ring and pointer', () => {
-  const skins = descendants(syntax, node => ts.isVariableDeclaration(node)
-    && ts.isIdentifier(node.name) && node.name.text === 'SKINS')[0];
-  assert.ok(skins && ts.isObjectLiteralExpression(skins.initializer));
-  const skinIds = skins.initializer.properties.map(property => property.name.text);
-  assert.ok(skinIds.length >= 6, 'all current themes are checked');
+test('the fixed cream style supplies high-contrast home, preview and record-hint text with a visible focus ring and pointer', () => {
   const { game } = projectorFixture(1920, 1080);
   const home = makeHomeFixture(1920, 1080);
   game.reducedMotion = false;
   game.drawPauseHudButton = () => {};
-  for (const id of skinIds) {
-    game.selectedSkinId = id;
-    const skin = game.currentSkin();
-    home.selectedSkinId = id;
-    home.updateHomeLeaderboardPreviewUI();
-    const previewBackground = home.homeLeaderboardPreviewGraphics.fills[0];
-    assert.deepEqual([previewBackground.r, previewBackground.g, previewBackground.b], Array.from(skin.panelColor));
-    assert.equal(previewBackground.a, 255, `${id}: preview has its own opaque backdrop`);
-    for (const label of [home.homeLeaderboardPreviewTitle, home.homeLeaderboardPreviewSubtitle,
-      home.homeLeaderboardPreviewEmpty, ...home.homeLeaderboardPreviewRows, ...home.homeLeaderboardPreviewDetails,
-      ...home.homeLeaderboardPreviewTitles]) {
-      assert.ok(contrast(label.color, skin.panelColor) >= 4.5, `${id}: preview text remains readable`);
-      assert.equal(label.color.a, 255);
-    }
-    assert.ok(contrast(home.homeLeaderboardPreviewHint.color,
-      id === 'minimal-stack' ? [220, 235, 222] : skin.buttonColor) >= 4.5, `${id}: preview action is readable on its own fill`);
-    game.drawGameplayHudCards();
-    const hintBackground = game.recordGapGraphics.fills[0];
-    assert.deepEqual([hintBackground.r, hintBackground.g, hintBackground.b], Array.from(skin.panelColor));
-    assert.equal(hintBackground.a, 255, 'record hint uses its own opaque backdrop');
-    assert.ok(contrast(game.recordGapLabel.color, skin.panelColor) >= 4.5, `${id}: record hint remains readable`);
-    assert.equal(game.recordGapLabel.color.a, 255);
-    const hintRect = game.recordGapGraphics.rectangles[0];
-    assert.equal(hintRect.width, game.hudLayout().recordGapWidth);
-    assert.equal(hintRect.height, game.hudLayout().recordGapHeight);
-    for (const background of [skin.panelColor, skin.buttonColor, skin.accentColor]) {
-      const text = game.textOnButton(background);
-      assert.ok(text.r === 0 || text.r === 255, `${id}: text uses a clear black/white contrast choice`);
-      assert.equal(text.g, text.r);
-      assert.equal(text.b, text.r);
-      assert.equal(text.a, 255);
-      assert.ok(contrast(text, background) >= 4.5, `${id}: text contrast is at least 4.5:1`);
-    }
-    for (const selected of [false, true]) {
-      const graphics = recordingGraphics();
-      const label = new Label();
-      game.drawHomeButton(graphics, label, 620, 116, selected);
-      assert.ok(contrast(label.color, selected ? skin.accentColor : skin.buttonColor) >= 4.5,
-        `${id}: ${selected ? 'focused' : 'unfocused'} button caption retains contrast`);
-      if (selected) {
-        const outerRing = graphics.strokes.at(-1);
-        assert.ok(outerRing.width >= 4);
-        assert.ok(contrast(outerRing.color, skin.panelColor) >= 4.5, `${id}: outer focus ring is visible against panel`);
-        assert.ok(contrast(graphics.fills.at(-1), skin.accentColor) >= 4.5, `${id}: focus pointer is visible against button`);
-        assert.equal(graphics.node.scale.x, 1.018);
-      }
+  const style = CREAM_STYLE;
+  home.updateHomeLeaderboardPreviewUI();
+  const previewBackground = home.homeLeaderboardPreviewGraphics.fills[0];
+  assert.deepEqual([previewBackground.r, previewBackground.g, previewBackground.b], Array.from(style.panelColor));
+  assert.equal(previewBackground.a, 255, 'preview has its own opaque backdrop');
+  for (const label of [home.homeLeaderboardPreviewTitle, home.homeLeaderboardPreviewSubtitle,
+    home.homeLeaderboardPreviewEmpty, ...home.homeLeaderboardPreviewRows, ...home.homeLeaderboardPreviewDetails,
+    ...home.homeLeaderboardPreviewTitles]) {
+    assert.ok(contrast(label.color, style.panelColor) >= 4.5, 'preview text remains readable');
+    assert.equal(label.color.a, 255);
+  }
+  assert.ok(contrast(home.homeLeaderboardPreviewHint.color,
+    [220, 235, 222]) >= 4.5, 'preview action is readable on its own fill');
+  game.drawGameplayHudCards();
+  const hintBackground = game.recordGapGraphics.fills[0];
+  assert.deepEqual([hintBackground.r, hintBackground.g, hintBackground.b], Array.from(style.panelColor));
+  assert.equal(hintBackground.a, 255, 'record hint uses its own opaque backdrop');
+  assert.ok(contrast(game.recordGapLabel.color, style.panelColor) >= 4.5, 'record hint remains readable');
+  assert.equal(game.recordGapLabel.color.a, 255);
+  const hintRect = game.recordGapGraphics.rectangles[0];
+  assert.equal(hintRect.width, game.hudLayout().recordGapWidth);
+  assert.equal(hintRect.height, game.hudLayout().recordGapHeight);
+  for (const background of [style.panelColor, style.buttonColor, style.accentColor]) {
+    const text = game.textOnButton(background);
+    assert.ok(text.r === 0 || text.r === 255, 'text uses a clear black/white contrast choice');
+    assert.equal(text.g, text.r);
+    assert.equal(text.b, text.r);
+    assert.equal(text.a, 255);
+    assert.ok(contrast(text, background) >= 4.5, 'text contrast is at least 4.5:1');
+  }
+  for (const selected of [false, true]) {
+    const graphics = recordingGraphics();
+    const label = new Label();
+    game.drawHomeButton(graphics, label, 620, 116, selected);
+    assert.ok(contrast(label.color, selected ? style.accentColor : style.buttonColor) >= 4.5,
+      `${selected ? 'focused' : 'unfocused'} button caption retains contrast`);
+    if (selected) {
+      const outerRing = graphics.strokes.at(-1);
+      assert.ok(outerRing.width >= 4);
+      assert.ok(contrast(outerRing.color, style.panelColor) >= 4.5, 'outer focus ring is visible against panel');
+      assert.ok(contrast(graphics.fills.at(-1), style.accentColor) >= 4.5, 'focus pointer is visible against button');
+      assert.equal(graphics.node.scale.x, 1.018);
     }
   }
 });

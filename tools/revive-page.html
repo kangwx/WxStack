@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="referrer" content="no-referrer">
+  <title>叠高高 · 扫码复活</title>
+  <style>
+    *{box-sizing:border-box}body{margin:0;min-height:100svh;display:grid;place-items:center;padding:24px;background:#d2bcb5;color:#53434e;font-family:system-ui,sans-serif}
+    main{width:min(100%,440px);padding:40px 24px;background:#fff8e7;border-radius:28px;text-align:center;box-shadow:0 8px 0 #85686a22}
+    .blocks{height:82px;display:flex;flex-direction:column;align-items:center;gap:6px}.blocks i{width:96px;height:20px;border-radius:6px;background:#aecfc5}.blocks i:nth-child(2){width:112px;background:#c5b1d0}.blocks i:nth-child(3){width:128px;background:#ecd0a1}
+    h1{font-size:30px;margin:24px 0 12px}p{line-height:1.7}button{width:100%;margin-top:18px;border:2px solid #53675f;background:#aecfc5;color:#253d34;border-radius:16px;padding:18px;font:700 21px system-ui;cursor:pointer}button:focus-visible{outline:3px solid #53434e;outline-offset:4px}button:disabled{opacity:.6;cursor:default}.note{font-size:14px;color:#69565e}
+  </style>
+</head>
+<body><main>
+  <div class="blocks" aria-hidden="true"><i></i><i></i><i></i></div>
+  <h1>再叠一次，继续挑战</h1>
+  <p id="status" role="status" aria-live="polite">确认后，塔顶和新方块恢复为初始宽深的 50%，保留分数继续挑战。</p>
+  <button id="confirm" type="button">确认复活</button>
+  <p class="note">每局可复活一次 · 不消耗体力<br>请保持游戏中的二维码页面打开</p>
+</main>
+<script>
+  const match = location.hash.slice(1).match(/^([A-Za-z0-9_-]{32})\.([A-Za-z0-9_-]{32})$/);
+  const button = document.querySelector('#confirm');
+  const status = document.querySelector('#status');
+  if (!match) { button.disabled = true; status.textContent = '链接无效，请扫描游戏里的二维码。'; }
+  button.addEventListener('click', async () => {
+    if (!match || button.disabled) return;
+    button.disabled = true; status.textContent = '正在确认…';
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 8000);
+    try {
+      const response = await fetch('/api/revive/' + match[1] + '/confirm', {
+        method:'POST', headers:{Authorization:'Bearer ' + match[2]}, signal:controller.signal,
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || '确认失败，请重试');
+      status.textContent = '已确认复活！请回到游戏继续挑战。'; button.textContent = '确认成功';
+    } catch (error) {
+      status.textContent = error.name === 'AbortError' ? '连接超时，请检查网络后重试。' : error.message;
+      button.disabled = false;
+    } finally { clearTimeout(timer); }
+  });
+</script></body></html>

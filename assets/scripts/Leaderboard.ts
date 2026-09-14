@@ -21,6 +21,7 @@ export interface RoundResult {
   finishedAt: number;
   testMode: boolean;
   nickname?: string;
+  revived?: boolean;
 }
 
 export interface LeaderboardSnapshot {
@@ -174,8 +175,9 @@ export class LocalLeaderboardRepository implements LeaderboardRepository {
       nickname: result.nickname,
     };
     if (!validEntry(entry)) throw new Error('Invalid round result');
-    if (!this.entries.some(saved => saved.id === entry.id)) {
-      this.entries = ranked([...this.entries, entry]);
+    const previous = this.entries.find(saved => saved.id === entry.id);
+    if (!previous || (result.revived && previous.kind === 'round' && entry.score > previous.score)) {
+      this.entries = ranked([...this.entries.filter(saved => saved.id !== entry.id), entry]);
       this.persist();
     }
     return this.snapshot();

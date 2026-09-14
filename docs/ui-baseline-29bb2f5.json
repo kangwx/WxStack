@@ -1,0 +1,258 @@
+{
+  "baseline": "29bb2f5",
+  "kind": "offline-node-and-drawing-contract-not-screenshots",
+  "cases": [
+    {
+      "width": 1920,
+      "height": 1080,
+      "theme": "minimal-stack",
+      "sha256": "c93896e76d5a2034cf3f231bd2cc06371690492363f47cccd2ddd8b616f3d7db"
+    },
+    {
+      "width": 1920,
+      "height": 1080,
+      "theme": "classic",
+      "sha256": "bdf5ea99b37f6584e1723f27c951c9c1ee637bd8ca5eb55eeff302d401dfbedb"
+    },
+    {
+      "width": 1920,
+      "height": 1080,
+      "theme": "cyber-neon",
+      "sha256": "f8044b6a38ce93ce430bb1452ae3bc444781c5622f9ee2221f1c44b25abfa70d"
+    },
+    {
+      "width": 1920,
+      "height": 1080,
+      "theme": "porcelain-moon",
+      "sha256": "4c6e15f76cdaf09d549135973f514fc1b8bdd19622662cc9f4038c339269daa1"
+    },
+    {
+      "width": 1920,
+      "height": 1080,
+      "theme": "pastel-toy",
+      "sha256": "62dc88edbe814eef1f56dab90d1f2ab8875827049b124aca206f97aae39d8a90"
+    },
+    {
+      "width": 1920,
+      "height": 1080,
+      "theme": "nature-zen",
+      "sha256": "5b47d388d568e7968d93c752cf536fc5e5ed1baf8fdeedd13ff3f9f62c519096"
+    },
+    {
+      "width": 1280,
+      "height": 720,
+      "theme": "minimal-stack",
+      "sha256": "c93896e76d5a2034cf3f231bd2cc06371690492363f47cccd2ddd8b616f3d7db"
+    },
+    {
+      "width": 1280,
+      "height": 720,
+      "theme": "classic",
+      "sha256": "bdf5ea99b37f6584e1723f27c951c9c1ee637bd8ca5eb55eeff302d401dfbedb"
+    },
+    {
+      "width": 1280,
+      "height": 720,
+      "theme": "cyber-neon",
+      "sha256": "f8044b6a38ce93ce430bb1452ae3bc444781c5622f9ee2221f1c44b25abfa70d"
+    },
+    {
+      "width": 1280,
+      "height": 720,
+      "theme": "porcelain-moon",
+      "sha256": "4c6e15f76cdaf09d549135973f514fc1b8bdd19622662cc9f4038c339269daa1"
+    },
+    {
+      "width": 1280,
+      "height": 720,
+      "theme": "pastel-toy",
+      "sha256": "62dc88edbe814eef1f56dab90d1f2ab8875827049b124aca206f97aae39d8a90"
+    },
+    {
+      "width": 1280,
+      "height": 720,
+      "theme": "nature-zen",
+      "sha256": "5b47d388d568e7968d93c752cf536fc5e5ed1baf8fdeedd13ff3f9f62c519096"
+    },
+    {
+      "width": 1024,
+      "height": 768,
+      "theme": "minimal-stack",
+      "sha256": "e23113ab5a52d7adf113f4917db77d2d19c030ac1375a5ef904c5696b98910a0"
+    },
+    {
+      "width": 1024,
+      "height": 768,
+      "theme": "classic",
+      "sha256": "96f380826528c931aefd01db86b12a3eccce09a15b666e89352f1852ab91596a"
+    },
+    {
+      "width": 1024,
+      "height": 768,
+      "theme": "cyber-neon",
+      "sha256": "06e20149bde185e2c265b97714c2ee25466fd00bcfdbe621f5164a0fbab3b0d0"
+    },
+    {
+      "width": 1024,
+      "height": 768,
+      "theme": "porcelain-moon",
+      "sha256": "a389f7b139cbee1a459b98967103f19800d1d6e22fcba239aec9a3b6878e7c8e"
+    },
+    {
+      "width": 1024,
+      "height": 768,
+      "theme": "pastel-toy",
+      "sha256": "2b50827cd0770543bce44abffe51cbc7973f2d505eb55bcd7df4d01b6b644eaa"
+    },
+    {
+      "width": 1024,
+      "height": 768,
+      "theme": "nature-zen",
+      "sha256": "192531908ffbbca4827568b2b9bd7a928bb0081a59a0d50ac26a1e55c66fdd84"
+    },
+    {
+      "width": 390,
+      "height": 844,
+      "theme": "minimal-stack",
+      "sha256": "27c41963212c6a9d6d2ddbce5e4275bb01c69083ea20534afd1a746c8e669d6e"
+    },
+    {
+      "width": 390,
+      "height": 844,
+      "theme": "classic",
+      "sha256": "32df687e3c303dac41f62f2622bf180628711e6eea72493a2b3b1a7b8f8df549"
+    },
+    {
+      "width": 390,
+      "height": 844,
+      "theme": "cyber-neon",
+      "sha256": "34272b80af0929ef1eda3af7fa48a296ca12729199c34ab2f636ecbba96fa27e"
+    },
+    {
+      "width": 390,
+      "height": 844,
+      "theme": "porcelain-moon",
+      "sha256": "160fe095bd5d49e183499c495e1a8f34aabe52a949ef5976f24d4395b13300ee"
+    },
+    {
+      "width": 390,
+      "height": 844,
+      "theme": "pastel-toy",
+      "sha256": "ce2b495219bafe62e3817596a3f3d6ff2c7c64f511c0a708a69fc72791f499b1"
+    },
+    {
+      "width": 390,
+      "height": 844,
+      "theme": "nature-zen",
+      "sha256": "9289349871d2dda88b60e8fbf3e7b5ce98539fd38c14da4d34375fc4095b48a6"
+    },
+    {
+      "width": 3840,
+      "height": 2160,
+      "theme": "minimal-stack",
+      "sha256": "c93896e76d5a2034cf3f231bd2cc06371690492363f47cccd2ddd8b616f3d7db"
+    },
+    {
+      "width": 3840,
+      "height": 2160,
+      "theme": "classic",
+      "sha256": "bdf5ea99b37f6584e1723f27c951c9c1ee637bd8ca5eb55eeff302d401dfbedb"
+    },
+    {
+      "width": 3840,
+      "height": 2160,
+      "theme": "cyber-neon",
+      "sha256": "f8044b6a38ce93ce430bb1452ae3bc444781c5622f9ee2221f1c44b25abfa70d"
+    },
+    {
+      "width": 3840,
+      "height": 2160,
+      "theme": "porcelain-moon",
+      "sha256": "4c6e15f76cdaf09d549135973f514fc1b8bdd19622662cc9f4038c339269daa1"
+    },
+    {
+      "width": 3840,
+      "height": 2160,
+      "theme": "pastel-toy",
+      "sha256": "62dc88edbe814eef1f56dab90d1f2ab8875827049b124aca206f97aae39d8a90"
+    },
+    {
+      "width": 3840,
+      "height": 2160,
+      "theme": "nature-zen",
+      "sha256": "5b47d388d568e7968d93c752cf536fc5e5ed1baf8fdeedd13ff3f9f62c519096"
+    },
+    {
+      "width": 2560,
+      "height": 1080,
+      "theme": "minimal-stack",
+      "sha256": "b18d7bc6d6c92df71af333e5924319c78f43a98588570152aff77f1ecd932196"
+    },
+    {
+      "width": 2560,
+      "height": 1080,
+      "theme": "classic",
+      "sha256": "67a89c9ba3e68dfbaeef60815e12fd3b2e672a8352f63737ea9d66d5041e0720"
+    },
+    {
+      "width": 2560,
+      "height": 1080,
+      "theme": "cyber-neon",
+      "sha256": "58e50fde1dcd81031ef852254383721f7f2328af5c3fe49e836b38f6eb350ca4"
+    },
+    {
+      "width": 2560,
+      "height": 1080,
+      "theme": "porcelain-moon",
+      "sha256": "62f2cd7cf353f723c8b485c18b23d1a884931e3aa3d09603d3769faa9b826ab0"
+    },
+    {
+      "width": 2560,
+      "height": 1080,
+      "theme": "pastel-toy",
+      "sha256": "b350aa3b086fa5cd5e0a8368a22a987bf60eeb5d11f001e799697ae8e9cfb044"
+    },
+    {
+      "width": 2560,
+      "height": 1080,
+      "theme": "nature-zen",
+      "sha256": "f44243f12a24c1a8184864188c5a257906771a947647bfbda851f282d5566bd2"
+    },
+    {
+      "width": 320,
+      "height": 568,
+      "theme": "minimal-stack",
+      "sha256": "311cf51e9f0c5b8afa49cf793cce1dd67be01bcae551539eb35f059b35140e71"
+    },
+    {
+      "width": 320,
+      "height": 568,
+      "theme": "classic",
+      "sha256": "e45dfa8d914c2c525188933c490cb16962db3f5b4411d96bea69b26cb44572d8"
+    },
+    {
+      "width": 320,
+      "height": 568,
+      "theme": "cyber-neon",
+      "sha256": "10f93208737268588b82c7d0bba182038fa59acdd1e142c13130c97ca0b213a9"
+    },
+    {
+      "width": 320,
+      "height": 568,
+      "theme": "porcelain-moon",
+      "sha256": "197f823605976ed62280aa7f5b22bc4ea96eb78ff299bb9e305d388fc80789b2"
+    },
+    {
+      "width": 320,
+      "height": 568,
+      "theme": "pastel-toy",
+      "sha256": "a4b8c5c737c2809a62f655b31868db62870462c1b37204945f77e8a979d4b769"
+    },
+    {
+      "width": 320,
+      "height": 568,
+      "theme": "nature-zen",
+      "sha256": "2a12672ac3babe0f77478f49d4f6f30ae7cb69dbdf7e8a2b2c85c3759e16ad59"
+    }
+  ]
+}
