@@ -62,7 +62,7 @@ export function projectorPanelLayout(
   const contentWidth = panelWidth - (leaderboard ? (split ? 96 : 56) : (split ? 128 : 80));
   const buttonWidth = Math.min(640, contentWidth);
   const buttonYs = leaderboard ? []
-    : kind === 'settings' ? [160, 40, -80, -200, -320, -440]
+    : kind === 'settings' ? [170, 70, -30, -130, -230, -330, -430]
     : kind === 'pause' ? [60, -116, -292]
     : [-148, -286, -424];
   const rowWidth = leaderboard ? contentWidth - 20 : buttonWidth;
@@ -80,7 +80,7 @@ export function projectorPanelLayout(
     panelHeight,
     contentWidth,
     buttonWidth,
-    buttonHeight: (leaderboard ? 68 : kind === 'settings' ? 88 : kind === 'result' ? 104 : 116) * scale,
+    buttonHeight: (leaderboard ? 68 : kind === 'settings' ? 72 : kind === 'result' ? 104 : 116) * scale,
     titleY: (leaderboard ? 476 : 350) * scale,
     titleSize: Math.min(split ? 88 : 64, contentWidth / 5) * scale,
     subtitleY: (leaderboard ? 384 : 250) * scale,

@@ -10,9 +10,17 @@ const ts = require(path.join(creator, 'Contents/Resources/app.asar.unpacked/node
 
 class Vec3 {
   constructor(x = 0, y = 0, z = 0) { Object.assign(this, { x, y, z }); }
+  set(x, y, z) { Object.assign(this, { x, y, z }); return this; }
+  static transformMat4(out, value, matrix) {
+    return out.set(value.x + matrix.x, value.y + matrix.y, value.z + matrix.z);
+  }
   static ZERO = new Vec3();
   static ONE = new Vec3(1, 1, 1);
   static UP = new Vec3(0, 1, 0);
+}
+class Mat4 {
+  x = 0; y = 0; z = 0;
+  static invert(out, value) { Object.assign(out, { x: -value.x, y: -value.y, z: -value.z }); return out; }
 }
 class Asset {
   destroyed = false;
@@ -52,8 +60,8 @@ class Camera {
   static ClearFlag = { SOLID_COLOR: 0, DEPTH_ONLY: 1 };
   camera = { update() {} };
   convertToUINode(pos) { return pos; }
-  worldToScreen(pos) { return new Vec3(640 + pos.x * 50, 360 + pos.y * 50, 0.5); }
-  screenToWorld(pos) { return new Vec3((pos.x - 640) * 2, (pos.y - 360) * 2, 0); }
+  worldToScreen(pos, out = new Vec3()) { return out.set(640 + pos.x * 50, 360 + pos.y * 50, 0.5); }
+  screenToWorld(pos, out = new Vec3()) { return out.set((pos.x - 640) * 2, (pos.y - 360) * 2, 0); }
 }
 class UITransform { convertToNodeSpaceAR(pos) { return pos; } }
 class Node {
@@ -71,6 +79,7 @@ class Node {
   setScale(x, y, z) { this.scale = new Vec3(x, y, z); }
   setRotationFromEuler() {}
   lookAt() {}
+  getWorldMatrix(out) { Object.assign(out, this.position); return out; }
   destroy() { this.isValid = false; }
 }
 const cc = {
@@ -80,7 +89,7 @@ const cc = {
   Tween: { stopAllByTarget() {} },
   ERigidBodyType: { STATIC: 0, KINEMATIC: 1, DYNAMIC: 2 },
   Layers: { BitMask: { DEFAULT: 1, UI_2D: 2, PROFILER: 4 } },
-  Material, Mesh: Asset, MeshRenderer, Node, RigidBody, UITransform, Vec3,
+  Material, Mat4, Mesh: Asset, MeshRenderer, Node, RigidBody, UITransform, Vec3,
   KeyCode: {
     ENTER: 13, SPACE: 32, ESCAPE: 27,
     ARROW_LEFT: 37, ARROW_UP: 38, ARROW_RIGHT: 39, ARROW_DOWN: 40,
@@ -98,7 +107,7 @@ const compiled = ts.transpileModule(source, { compilerOptions: {
 } }).outputText;
 const { CREAM_STYLE } = loadPlainModule('CreamStyle');
 const sandbox = { exports: {}, require: id => {
-  if (id === './CreamStyle') return { CREAM_STYLE };
+  if (id === './CreamStyle') return loadPlainModule('CreamStyle');
   assert.equal(id, 'cc'); return cc;
 } };
 vm.runInNewContext(compiled, sandbox);
@@ -174,39 +183,39 @@ test('tower fades reuse transparent cream materials for debris and preserve back
   assert.ok(materials.every(material => material.destroyed));
 });
 
-test('only the intended support can resolve a drop, including a persistent contact', () => {
+test('overlapping retained blocks land on a finite timed path without physics contacts', () => {
   const { world, base, moving } = setup();
   world.beginDrop(moving, base);
-  const drop = world.dropCollider;
-  const stray = new Node('StackBlock-0');
-  drop.emit('onCollisionEnter', stray.addComponent(BoxCollider));
-  assert.equal(world.pollDrop(0.1), null);
-  drop.emit('onCollisionStay', world.blockNodes.get(base).getComponent(BoxCollider));
-  assert.equal(world.pollDrop(0), 'landed');
+  assert.equal(world.droppingNode.getComponent(RigidBody).type, cc.ERigidBodyType.KINEMATIC);
+  assert.equal(world.pollDrop(0.03), null);
+  assert.ok(world.droppingNode.position.y < 0.98);
+  assert.ok(world.droppingNode.position.y > 0.93);
+  assert.equal(world.pollDrop(0.07), 'landed');
   world.settle(moving);
-  assert.equal(drop.events.size, 0);
+  assert.equal(world.pollDrop(1), null);
   world.destroy();
 });
-test('a side contact below the target and a stalled drop do not award a landing', () => {
-  const { world, base, moving } = setup();
-  world.beginDrop(moving, base);
-  world.droppingNode.setPosition(0, 0, 0);
-  world.dropCollider.emit('onCollisionEnter', world.blockNodes.get(base).getComponent(BoxCollider));
-  assert.equal(world.pollDrop(0.1), null);
-  assert.equal(world.pollDrop(2), 'missed');
-  world.destroy();
+test('no overlap on either axis stays a miss, including edge-only contact', () => {
+  for (const axis of ['x', 'z']) {
+    const { world, base, moving } = setup();
+    moving[axis] = 5;
+    world.beginDrop(moving, base);
+    assert.equal(world.pollDrop(0.03), null);
+    assert.equal(world.pollDrop(0.1), 'missed');
+    world.destroy();
+  }
 });
-test('restart disables old colliders immediately and removes pending contact listeners', () => {
+test('pause freezes the controlled drop and restart removes it and old colliders', () => {
   const { world, base, moving } = setup();
   world.beginDrop(moving, base);
   const nodes = [...world.blockNodes.values()];
-  const collider = world.dropCollider;
   world.setPaused(true);
   assert.equal(cc.PhysicsSystem.instance.enable, false);
+  assert.equal(world.pollDrop(10), null);
+  assert.equal(world.dropElapsed, 0);
   world.reset();
   assert.equal(cc.PhysicsSystem.instance.enable, true);
   assert.ok(nodes.every(n => !n.active));
-  assert.equal(collider.events.size, 0);
   assert.equal(world.pollDrop(10), null);
   world.destroy();
 });
@@ -440,13 +449,15 @@ function loadPlainModule(name) {
 }
 const loadLayoutModule = () => loadPlainModule('ProjectorLayout');
 const leaderboardData = loadPlainModule('Leaderboard');
-const gameSandbox = { exports: {}, require: id => id === 'cc' ? cc
+const uiFixture = require('./cocos-ui-fixture.cjs').createUIFixture(cc);
+const gameSandbox = { exports: {}, require: id => id === 'cc' ? cc : id === 'cc/env' ? { DEBUG:false }
   : id === './ProjectorLayout' ? loadLayoutModule()
   : id === './Leaderboard' ? leaderboardData
   : id === './ReviveClient' ? loadPlainModule('ReviveClient')
   : id === './Stamina' ? loadPlainModule('Stamina')
   : id === './CreamStyle' ? { CREAM_STYLE }
-  : id === './RemoteInput' ? loadPlainModule('RemoteInput') : { StackWorld3D },
+  : id === './RemoteInput' ? loadPlainModule('RemoteInput')
+  : id === './StackWorld3D' ? { StackWorld3D } : uiFixture.load(id.replace(/^\.\//, '')),
   navigator: { userAgent: 'test-browser' } };
 vm.runInNewContext(gameCompiled, gameSandbox);
 const GamePrototype = gameSandbox.exports.StackGame.prototype;
@@ -454,15 +465,11 @@ const GamePrototype = gameSandbox.exports.StackGame.prototype;
 function buildInitialWorld(game = new gameSandbox.exports.StackGame()) {
   game.node = new Node('Canvas');
   game.node.scene = new Node('Scene');
-  const reachedUI = new Error('initial world construction completed');
-  // Execute the real buildStage prefix, stopping at its first 2D UI node. No
-  // asset callback or rendering hook has run at this point.
-  game.makeNode = name => {
-    assert.equal(name, 'StackRenderer');
-    throw reachedUI;
-  };
+  game.node.addComponent(UITransform);
+  const loaded = uiFixture.attachGame(game);
+  game.node.addChild(loaded.root);
   try {
-    assert.throws(() => game.buildStage(), error => error === reachedUI);
+    game.buildStage();
   } catch (error) {
     game.world3D?.destroy();
     throw error;
@@ -470,7 +477,7 @@ function buildInitialWorld(game = new gameSandbox.exports.StackGame()) {
   return game;
 }
 
-test('the controller creates a complete cream world before building its 2D interface', () => {
+test('the controller binds the authored interface and creates a complete cream world before readiness', () => {
   const game = buildInitialWorld();
   const world = game.world3D;
   try {
@@ -569,12 +576,19 @@ test('browser readiness is cancelled for a destroyed controller and omitted outs
   }
 });
 
-test('home button construction does not refresh focus before the start prompt exists', () => {
-  const start = gameSource.indexOf('private buildHomeButtons');
-  const end = gameSource.indexOf('private buildHomeOverlays', start);
-  const buildHomeButtonsSource = gameSource.slice(start, end);
-  assert.equal(buildHomeButtonsSource.includes('updateHomeMenuFocus()'), false);
-  assert.ok(gameSource.includes('|| !this.startPromptLabel)'));
+test('home focus ignores incomplete bindings and updates all three controls after the prompt is bound', () => {
+  const game = new gameSandbox.exports.StackGame();
+  uiFixture.attachGame(game);
+  const prompt = game.startPromptLabel;
+  let rendered = 0;
+  game.drawHomeButton = () => { rendered++; };
+  game.startPromptLabel = null;
+  game.updateHomeMenuFocus();
+  assert.equal(rendered, 0);
+  game.startPromptLabel = prompt;
+  game.updateHomeMenuFocus();
+  assert.equal(rendered, 3);
+  assert.equal(prompt.node.parent, game.startButton);
 });
 
 test('web startup cover prevents the engine clear color from flashing before the cream frame', () => {
@@ -582,11 +596,13 @@ test('web startup cover prevents the engine clear color from flashing before the
   assert.match(webTemplate, /body\.game-ready #GameCanvas/);
   assert.match(webTemplate, /window\.addEventListener\('stack-game-ready'/);
   assert.match(gameSource, /window\.dispatchEvent\(new Event\('stack-game-ready'\)\)/);
-  assert.match(gameSource, /this\.showReadyScreen\(\);\s*this\.notifyBrowserReady\(\);/);
+  const startup = gameSource.slice(gameSource.indexOf('onLoad(): void'), gameSource.indexOf('onEnable(): void'));
+  assert.ok(startup.indexOf('this.showReadyScreen();') >= 0);
+  assert.ok(startup.indexOf('this.notifyBrowserReady();') > startup.indexOf('this.showReadyScreen();'));
 });
 
 test('home menu exposes default focus and remote direction, confirm, and back actions', () => {
-  const game = Object.create(GamePrototype);
+  const game = new gameSandbox.exports.StackGame();
   let started = 0;
   let opened = '';
   let closed = 0;
@@ -600,16 +616,16 @@ test('home menu exposes default focus and remote direction, confirm, and back ac
 
   game.handleKeyDownCode(cc.KeyCode.ARROW_DOWN);
   assert.equal(game.homeSelection, 1);
-  game.heldKeys.delete(cc.KeyCode.ARROW_DOWN);
+  game.inputRouter.keyUp(cc.KeyCode.ARROW_DOWN);
   game.handleKeyDownCode(23);
   assert.equal(opened, 'leaderboard');
   assert.equal(started, 0);
-  game.heldKeys.delete(23);
+  game.inputRouter.keyUp(23);
   game.homeOverlay = 'settings';
   game.handleKeyDownCode(10009);
   assert.equal(closed, 1);
 
-  game.heldKeys.delete(10009);
+  game.inputRouter.keyUp(10009);
   game.homeSelection = 0;
   game.handleKeyDownCode(cc.KeyCode.ENTER);
   assert.equal(started, 1);
@@ -618,7 +634,7 @@ test('home menu exposes default focus and remote direction, confirm, and back ac
 });
 
 function leaderboardInputGame() {
-  const game = Object.create(GamePrototype);
+  const game = new gameSandbox.exports.StackGame();
   const opened = [];
   const pages = [];
   Object.assign(game, {
@@ -651,7 +667,7 @@ test('home Right, D and K open the leaderboard directly from any selection witho
       assert.equal(game.homeSelection, 1, 'return focus belongs to the leaderboard button');
       game.handleKeyDownCode(key);
       assert.deepEqual(pages, [], 'holding the opening key must not immediately turn a page');
-      game.heldKeys.delete(key);
+      game.inputRouter.keyUp(key);
       game.handleKeyDownCode(cc.KeyCode.ESCAPE);
       assert.equal(game.homeOverlay, 'none');
       assert.equal(game.homeSelection, 1);
@@ -662,7 +678,7 @@ test('home Right, D and K open the leaderboard directly from any selection witho
 test('home vertical and left navigation retain their three-item wrap order', () => {
   const { game, opened } = leaderboardInputGame();
   for (const key of [cc.KeyCode.ARROW_DOWN, cc.KeyCode.KEY_S, cc.KeyCode.ARROW_DOWN]) {
-    game.heldKeys.delete(key);
+    game.inputRouter.keyUp(key);
     game.handleKeyDownCode(key);
   }
   assert.equal(game.homeSelection, 0);
@@ -772,9 +788,9 @@ test('Android nickname bridge confirms text before saving, supports focus direct
   assert.deepEqual(actions, [], 'confirming text must not save on the same press');
   game.onAndroidRemoteKey(23, 0, 1);
   assert.deepEqual(actions, [], 'held confirm does not immediately activate Save');
-  game.heldKeys.add(cc.KeyCode.ENTER);
+  game.inputRouter.keyDown(cc.KeyCode.ENTER);
   game.onAndroidRemoteKey(23, 1, 0);
-  assert.equal(game.heldKeys.has(cc.KeyCode.ENTER), false);
+  assert.equal(game.inputRouter.held.has(cc.KeyCode.ENTER), false);
   game.onAndroidRemoteKey(23, 0, 0);
   assert.deepEqual(actions, ['save']);
 
@@ -832,7 +848,7 @@ test('pause, failure and result use a full-tower overview and share the projecto
     const composition = [];
     const overviews = [];
     const homePresentation = [];
-    const game = Object.create(GamePrototype);
+    const game = new gameSandbox.exports.StackGame();
     Object.assign(game, {
       phase: 'falling', visibleWidth: width / height * 1334, visibleHeight: 1334, stack: [{ level: 12 }],
       world3D: {
@@ -869,15 +885,18 @@ test('home framing adds presentation space, survives reset, and restores gamepla
 });
 
 test('perfect particles originate on the grown block contact perimeter, not its top', () => {
-  const game = Object.create(GamePrototype);
-  Object.assign(game, {
-    sparks: [], rings: [],
-    project(x, z, level) { return { x: (x - z) * 20, y: -(x + z) * 10 + level * 30 }; },
-  });
+  const game = new gameSandbox.exports.StackGame();
+  const fx = uiFixture.prefab('GameplayFxRoot').root.getComponent(uiFixture.GameplayFxController);
+  let prepared = 0;
+  game.world3D = { prepareProjection(node) { assert.equal(node, fx.node); prepared++; } };
+  fx.initialize((x,z,level,out) => { assert.ok(prepared > 0, 'impact projection must use the current camera'); out.set((x-z)*20,-(x+z)*10+level*30,0); });
+  game.ui = { gameplayFx: fx };
   const block = { x: 1.3, z: -0.7, width: 4.62, depth: 3.12, level: 9, hue: 60 };
   game.spawnImpactFx(block, true, 4);
-  assert.ok(game.sparks.length > 0);
-  for (const spark of game.sparks) {
+  assert.equal(prepared, 1);
+  const sparks = fx.sparks.filter(spark => spark.life > 0);
+  assert.ok(sparks.length > 0);
+  for (const spark of sparks) {
     assert.equal(spark.level, block.level);
     const dx = Math.abs(spark.worldX - block.x) / (block.width / 2);
     const dz = Math.abs(spark.worldZ - block.z) / (block.depth / 2);
@@ -885,28 +904,30 @@ test('perfect particles originate on the grown block contact perimeter, not its 
     assert.ok(Math.abs(spark.worldX - block.x - block.width / 2) < 1e-9
       || Math.abs(spark.worldZ - block.z - block.depth / 2) < 1e-9);
   }
-  game.sparks = [];
+  fx.clear();
   game.spawnImpactFx(block, false);
-  assert.ok(game.sparks.every(spark => spark.level === block.level + 1));
-  assert.equal(game.rings[0].level, block.level + 1);
+  assert.equal(prepared, 1, 'non-perfect emission does not project until rendering');
+  assert.ok(fx.sparks.filter(spark => spark.life > 0).every(spark => spark.level === block.level + 1));
+  assert.equal(fx.rings.find(ring => ring.life > 0).level, block.level + 1);
 });
 
 test('all perfect frame waves project to the contact plane, including reduced motion', () => {
   for (const reducedMotion of [false, true]) {
-    const game = Object.create(GamePrototype);
+    const game = new gameSandbox.exports.StackGame();
     const heights = [];
+    const fx = uiFixture.prefab('GameplayFxRoot').root.getComponent(uiFixture.GameplayFxController);
+    fx.initialize((x,z,level,out) => {heights.push(level);out.set((x-z)*20,(x+z)*10+level*30,0);});
     Object.assign(game, {
-      reducedMotion, perfectFrames: [], sparks: [], rings: [], visibleWidth: 750,
-      project(x, z, level) { heights.push(level); return { x: (x - z) * 20, y: (x + z) * 10 + level * 30 }; },
+      reducedMotion, ui:{gameplayFx:fx}, visibleWidth:750, visibleHeight:1334, flashAlpha:0,
+      stamina:{snapshot:()=>({amount:5,nextAt:null})},
+      world3D:{prepareProjection(){}}, drawOverlay(){}, drawScreenDimmer(){},
     });
     const block = { x: 1, z: 2, width: 5, depth: 4.8, level: 12, hue: 60 };
     game.spawnPerfectFrames(block, 8);
-    const graphics = { clear() {}, moveTo() {}, lineTo() {}, close() {}, stroke() {} };
-    for (const frame of game.perfectFrames) {
+    for (const frame of fx.frames.filter(frame => frame.active)) {
       frame.elapsed = frame.delay + 0.08;
-      assert.equal(frame.fillAlpha, 0);
     }
-    game.drawEffects(graphics);
+    game.drawFrame();
     assert.ok(heights.length > 0);
     assert.ok(heights.every(level => level === block.level));
   }
@@ -957,16 +978,12 @@ test('the permanent cream table preserves block dimensions and resource ownershi
   assert.ok(materials.every(material => material.destroyed));
 });
 
-test('all stage contacts never award a layer and all falling bodies use continuous collision detection', () => {
+test('retained blocks use controlled movement while detached pieces keep continuous physics', () => {
   const { world, base, moving } = setup();
+  const released = world.blockNodes.get(moving);
   world.beginDrop(moving, base);
-  assert.equal(world.droppingNode.getComponent(RigidBody).useCCD, true);
-  for (const node of world.worldRoot.getChildByName('CreamToyStage').children.filter(node => node.getComponent(BoxCollider))) {
-    world.dropCollider.emit('onCollisionEnter', node.getComponent(BoxCollider));
-    world.dropCollider.emit('onCollisionStay', node.getComponent(BoxCollider));
-    assert.equal(world.pollDrop(0.01), null, `${node.name} is not the intended stack support`);
-  }
-  assert.equal(world.pollDrop(2), 'missed');
+  assert.equal(world.droppingNode.getComponent(RigidBody).type, cc.ERigidBodyType.KINEMATIC);
+  assert.equal(world.pollDrop(0.1), 'landed');
   world.releaseMiss(moving, 'x', 1);
   world.spawnFragment({ ...base, width: 0.1 }, 'x', 1);
   assert.equal(world.looseNodes.size, 2);
@@ -974,13 +991,22 @@ test('all stage contacts never award a layer and all falling bodies use continuo
     assert.equal(node.getComponent(RigidBody).useCCD, true);
     assert.equal(node.getComponent(RigidBody).type, cc.ERigidBodyType.DYNAMIC);
   }
+  world.tick(5, 0, 0, 0);
+  assert.equal(world.looseCount, 0);
+  assert.equal(world.fragmentPoolAvailable, 32, 'a missed tower block must not inflate the fragment pool');
+  assert.ok(world.blockPool.includes(released));
+  const next = { ...moving, level: moving.level + 1 };
+  world.spawnMovingBlock(next);
+  assert.equal(world.blockNodes.get(next), released, 'a missed block is reused as a tower block');
+  assert.equal(released.getComponent(RigidBody).type, cc.ERigidBodyType.KINEMATIC);
+  assert.equal(released.getComponent(RigidBody).useGravity, false);
   world.destroy();
 });
 
 
 
 function homeTransitionGame(phase = 'gameover', reducedMotion = false) {
-  const game = Object.create(GamePrototype);
+  const game = new gameSandbox.exports.StackGame();
   let resets = 0;
   const pauses = [];
   const opacities = [];
@@ -989,7 +1015,7 @@ function homeTransitionGame(phase = 'gameover', reducedMotion = false) {
     visibleWidth: 1920 / 1080 * 1334, visibleHeight: 1334,
     transitionViews: [], heldKeys: new Set(),
     world3D: { setPaused(value) { pauses.push(value); }, setPresentationOpacity(value) { opacities.push(value); } },
-    transitionBlocker: { active: false }, effectsGraphics: { clear() {}, node: { active: true } },
+    transitionBlocker: { active: false }, ui:{gameplayFx:{clear(){},node:{active:true}}},
     drawScreenDimmer(alpha) { this.dimAlpha = alpha; },
     drawFrame() {},
     showReadyScreen() { resets += 1; this.setScreen('ready'); },
@@ -1004,7 +1030,7 @@ function homeTransitionGame(phase = 'gameover', reducedMotion = false) {
     },
   });
   for (const name of ['startGroup', 'settingsGroup', 'leaderboardGroup', 'pauseGroup', 'resultGroup', 'gameplayHudGroup', 'pauseButton']) {
-    game[name] = new Node(name); game[name].addComponent(Widget);
+    game[name] = new Node(name); game[name].addComponent(Widget); game[name].addComponent(UIOpacity);
   }
   game.testModeBadgeLabel = { node: new Node('TestBadge') };
   game.perfectLabel = { node: new Node('Perfect') };
@@ -1086,7 +1112,7 @@ test('settings opening and closing retain their short guarded transitions and re
   assert.equal(game.homeOverlay, 'none');
   game.updateHomeTransition(0.05);
   assert.ok(game.startGroup.position.x < 0);
-  assert.ok(game.dimAlpha >= 18 && game.dimAlpha <= 51);
+  assert.ok(game.dimAlpha >= 6 && game.dimAlpha <= 32);
   game.updateHomeTransition(0.05);
   assert.equal(game.settingsGroup.position.x, 24);
   assert.equal(opacities.length, 0, 'menu changes must not fade/reset the tower');
@@ -1201,8 +1227,10 @@ test('closing the real leaderboard restores button focus, invalidates pending lo
   let fullLoads = 0;
   let previewLoads = 0;
   let focused;
+  let stoppedScrolls = 0;
   Object.assign(game, {
     leaderboardRequest: 3, homeLeaderboardPreviewRequest: 4,
+    leaderboardScroll: { stopAutoScroll() { stoppedScrolls++; }, scrollToTop() {} },
     loadLeaderboard() { fullLoads += 1; }, loadHomeLeaderboardPreview() { previewLoads += 1; },
     updateHomeMenuFocus() { focused = this.homeSelection; }, updateSettingsUI() {},
   });
@@ -1218,14 +1246,15 @@ test('closing the real leaderboard restores button focus, invalidates pending lo
   assert.equal(previewLoads, 1);
   assert.equal(game.startGroup.active, true);
   assert.equal(game.leaderboardGroup.active, false);
+  assert.equal(stoppedScrolls, 2, 'opening and closing each cancel pending leaderboard inertia');
 });
 
 test('backgrounding during start leaves the revealed round paused', () => {
   const { game } = homeTransitionGame('ready');
-  Object.assign(game, { heldKeys:new Set([13]), pauseGame() { this.phase='paused'; } });
+  Object.assign(game, { pauseGame() { this.phase='paused'; } }); game.inputRouter.keyDown(13);
   game.beginScreenTransition(() => { game.phase='playing'; });
   game.onGameHide();
-  assert.equal(game.heldKeys.size, 0);
+  assert.equal(game.inputRouter.held.size, 0);
   assert.equal(game.homeTransition, null, 'backgrounding must settle immediately rather than waiting for another frame');
   game.updateHomeTransition(1);
   assert.equal(game.phase, 'paused');
@@ -1236,7 +1265,7 @@ test('resize settles navigation before layout and remote keys pressed in transit
   const { game } = homeTransitionGame('ready');
   game.beginScreenTransition(() => game.setScreen('playing'));
   game.handleKeyDownCode(13);
-  assert.equal(game.heldKeys.has(13), true);
+  assert.equal(game.inputRouter.held.has(13), true);
   game.resizeStage = () => {
     assert.equal(game.homeTransition, null);
     assert.equal(game.startGroup.position.x, 0);
@@ -1244,7 +1273,7 @@ test('resize settles navigation before layout and remote keys pressed in transit
   };
   game.onCanvasResize();
   game.handleKeyDownCode(13); // Would reach gameplay on a leaked held key.
-  assert.equal(game.heldKeys.has(13), true);
+  assert.equal(game.inputRouter.held.has(13), true);
 });
 
 test('cream transitions cap the dimmer and restore complete panel opacity and anchors', () => {
@@ -1261,9 +1290,12 @@ test('cream transitions cap the dimmer and restore complete panel opacity and an
 
 test('navigation has no full-screen cover renderer and panels own backgrounds with their content', () => {
   assert.doesNotMatch(gameSource, /transitionGraphics|drawHomeTransition|animateMenuEntrance/);
-  for (const group of ['startGroup', 'pauseGroup', 'resultGroup']) {
-    assert.ok(gameSource.includes(`this.${group}.addComponent(Graphics)`), group);
+  const fixture = uiFixture.prefab().bindings;
+  for (const [group,visual] of [['startGroup','homePanelGraphics'],['pauseGroup','pausePanelGraphics'],['resultGroup','resultPanelGraphics']]) {
+    assert.equal(fixture[visual].node,fixture[group]);
+    assert.equal(fixture[visual].fill.node.parent,fixture[group]);
   }
+  assert.doesNotMatch(gameSource,/addComponent\(Graphics\)|new Graphics|world3D\.sync\(/);
   const backdrop = gameSource.slice(gameSource.indexOf('private drawOverlayBackdrop'), gameSource.indexOf('private drawOverlayButton'));
   assert.doesNotMatch(backdrop, /graphics\.rect\(/, 'modal panel must not carry a full-screen moving dimmer');
 });
@@ -1386,19 +1418,21 @@ test('unavailable storage keeps cream startup and session settings usable', () =
   }
 });
 
-test('confirmed revival restores the top and moving block to half size while preserving lower layers and stamina', () => {
-  const game = Object.create(GamePrototype);
+for (const [width, depth] of [[3.8, 3], [1, 3], [3, 1], [1, 1], [2.5, 2.5]])
+test(`revival preserves larger dimensions and restores smaller ones: ${width} x ${depth}`, () => {
+  const game = new gameSandbox.exports.StackGame();
   const stack = [{ x: 0.2, z: -0.1, width: 4, depth: 3, level: 0 },
-    { x: 0.3, z: -0.1, width: 3.8, depth: 3, level: 1 }];
-  let resets = 0;
+    { x: 0.3, z: -0.1, width, depth, level: 1 }];
+  let resets = 0, effectsCleared = 0;
+  const restored = [];
   Object.assign(game, {
     phase: 'gameover', roundId: 'same-round', roundWasTest: false, roundNickname: '原玩家',
     roundPerfectCount: 1, roundRewardedPerfectCount: 1, coins: 101, score: 1, stack,
-    world3D: { reset() { resets++; } },
+    world3D: { reset() { resets++; },restoreStack(value){restored.push(value);},spawnMovingBlock(){} },
     stamina: { spend() { assert.fail('revival must not spend stamina'); } },
     resultGroup: { active: true }, pauseGroup: { active: false },
     gameplayHudGroup: { active: false }, pauseButton: { active: false },
-    fallingPieces: [{}], sparks: [{}], rings: [{}], perfectFrames: [{}],
+    ui:{gameplayFx:{clear(){effectsCleared++;},clearPerfectFrames(){}}},
     updateWorldComposition() {}, updateTestModeUI() {}, resetPerfectFeedback() {},
     setScore(value) { assert.equal(value, 1); }, drawFrame() {},
   });
@@ -1411,54 +1445,43 @@ test('confirmed revival restores the top and moving block to half size while pre
   assert.equal(game.roundRewardedPerfectCount, 1);
   assert.equal(game.coins, 101);
   assert.equal(game.current.level, 2);
-  assert.equal(game.current.width, 2.5);
-  assert.equal(game.current.depth, 2.5);
-  assert.equal(stack[1].width, 2.5);
-  assert.equal(stack[1].depth, 2.5);
+  assert.equal(game.current.width, Math.max(width, 2.5));
+  assert.equal(game.current.depth, Math.max(depth, 2.5));
+  assert.equal(stack[1].width, Math.max(width, 2.5));
+  assert.equal(stack[1].depth, Math.max(depth, 2.5));
   assert.equal(stack[0].width, 4);
   assert.equal(stack[0].depth, 3);
-  assert.equal(game.openingBlockEntering, true);
   assert.equal(game.gameplayHudGroup.active, true);
   assert.equal(game.resultGroup.active, false);
-  assert.equal(game.fallingPieces.length, 0);
+  assert.equal(effectsCleared, 1);
+  assert.equal(restored[0], stack);
   assert.equal(game.phase, 'playing');
 });
 
-test('QR confirmation is accepted once and late responses after cancellation cannot resume play', async () => {
-  const create = () => {
-    const game = Object.create(GamePrototype);
-    let resumed = 0, cancelled = 0;
-    Object.assign(game, { isValid: true, phase: 'gameover', roundId: 'round-one',
-      reviveRequest: 1, reviveUsed: false, revivePolling: false,
-      reviveGroup: { active: true }, reviveQr: { clear() {} }, reviveStatusLabel: { string: '' },
-      reviveSession: { expiresAt: Date.now() + 300000 },
-      drawReviveQR() {},
-      beginScreenTransition(swap) { swap(); }, resumeRevivedRound() { resumed++; },
-      reviveClient: { async status() { return { state: 'confirmed' }; },
-        async consume() { return { state: 'consumed' }; }, async cancel() { cancelled++; } },
-    });
-    return { game, resumed: () => resumed, cancelled: () => cancelled };
+test('ad revival resumes automatically and late responses after cancellation cannot resume play', async () => {
+  const { RewardAdController } = uiFixture.load('ui/RewardAdController');
+  const create=async()=>{
+    const game=new gameSandbox.exports.StackGame();let resumed=0;
+    Object.assign(game,{isValid:true,phase:'gameover',roundId:'round-one',reviveUsed:false,reviveGroup:{active:false},homeTransition:null});
+    const client={async requestRewardAdUrl(){return {adUrl:'https://example.test/ad',sceneId:'Revive'};},async queryRewardAdCompleted(){return true;}};
+    game.rewardAdController=new RewardAdController({client,timers:{set(){return 0;},clear(){}},
+      render:state=>{game.reviveGroup.active=state.open;},grant:()=>{game.reviveUsed=true;resumed++;}});
+    await game.openRevive();
+    return {game,client,resumed:()=>resumed};
   };
-  const accepted = create();
-  await accepted.game.pollRevive();
-  await accepted.game.pollRevive();
-  assert.equal(accepted.resumed(), 1);
-  assert.equal(accepted.game.reviveUsed, true);
-  assert.equal(accepted.game.reviveGroup.active, false);
-  const stale = create();
-  let resolve;
-  stale.game.reviveClient.status = () => new Promise(done => { resolve = done; });
-  stale.game.reviveClient.consume = () => assert.fail('cancelled QR must not be consumed');
-  const pending = stale.game.pollRevive();
-  stale.game.closeRevive();
-  resolve({ state: 'confirmed' });
-  await pending;
-  assert.equal(stale.resumed(), 0);
-  assert.equal(stale.cancelled(), 1);
+  const accepted=await create();
+  await accepted.game.rewardAdController.startRewardAdPolling(accepted.game.rewardAdController.generation);
+  assert.equal(accepted.resumed(),1);
+  accepted.game.onRewardDialogAction();accepted.game.onRewardDialogAction();
+  assert.equal(accepted.resumed(),1);assert.equal(accepted.game.reviveUsed,true);assert.equal(accepted.game.reviveGroup.active,false);
+  const stale=await create();let resolve,signal;stale.client.queryRewardAdCompleted=(_,s)=>{signal=s;return new Promise(done=>{resolve=done;});};
+  const pending=stale.game.rewardAdController.startRewardAdPolling(stale.game.rewardAdController.generation);
+  stale.game.closeRevive();stale.game.roundId='round-two';resolve(true);await pending;
+  assert.equal(stale.resumed(),0);assert.equal(signal.aborted,true);
 });
 
 test('result focus skips used revival and the QR modal captures back, confirm and pointer input', () => {
-  const game = Object.create(GamePrototype);
+  const game = new gameSandbox.exports.StackGame();
   Object.assign(game, { resultSelection: 0, reviveUsed: false, updateResultFocus() {},
     phase: 'gameover', heldKeys: new Set(), reviveGroup: { active: false }, homeOverlay: 'none' });
   game.moveResultSelection(-1); assert.equal(game.resultSelection, 2);
@@ -1476,50 +1499,29 @@ test('result focus skips used revival and the QR modal captures back, confirm an
   assert.equal(closes, 2);
 });
 
-test('rapid opening clicks cannot drop the first block before it enters the support footprint', () => {
-  const game = Object.create(GamePrototype);
-  const releases = [];
-  const misses = [];
-  Object.assign(game, {
-    stack: [{ x: 0, z: 0, width: 5, depth: 5, level: 0 }],
-    score: 0, phase: 'playing', spawnDelay: 0,
-    world3D: { beginDrop(block) { releases.push(block); } },
-    failPlacement(block) { misses.push(block); },
-  });
-  game.spawnMovingBlock();
-  const first = game.current;
-  for (let i = 0; i < 3; i += 1) {
-    game.updateMovingBlock(0.05);
+test('opening block drops immediately at any position and repeated clicks cannot release twice', () => {
+  for (const x of [-6, -4.9, 0]) {
+    const game = new gameSandbox.exports.StackGame();
+    let releases = 0, misses = 0;
+    Object.assign(game, {
+      stack: [{ x: 0, z: 0, width: 5, depth: 5, level: 0 }],
+      score: 0, phase: 'playing', spawnDelay: 0,
+      world3D: { beginDrop() { releases++; }, spawnMovingBlock() {} },
+      failPlacement() { misses++; },
+    });
+    game.spawnMovingBlock();
+    game.current.x = x;
     game.placeCurrentBlock();
-    assert.equal(game.current, first);
-    assert.equal(game.phase, 'playing');
-    assert.equal(releases.length, 0);
+    assert.equal(releases, 1);
+    assert.equal(game.phase, 'dropping');
+    assert.equal(misses, x === -6 ? 1 : 0);
+    game.placeCurrentBlock(); game.placeCurrentBlock();
+    assert.equal(releases, 1);
   }
-  game.updateMovingBlock(0.4);
-  game.placeCurrentBlock();
-  assert.equal(releases.length, 1);
-  assert.equal(game.phase, 'dropping');
-  assert.equal(misses.length, 0);
-
-  // A fresh round is protected again, but missing after the first pass is valid.
-  game.phase = 'playing';
-  game.spawnMovingBlock();
-  game.placeCurrentBlock();
-  assert.equal(releases.length, 1);
-  for (let i = 0; i < 60; i += 1) game.updateMovingBlock(0.05);
-  game.placeCurrentBlock();
-  assert.equal(misses.length, 1);
-
-  // Later blocks retain the normal immediate drop/miss rules.
-  game.phase = 'playing';
-  game.stack.push({ x: 0, z: 0, width: 5, depth: 5, level: 1 });
-  game.spawnMovingBlock();
-  game.placeCurrentBlock();
-  assert.equal(misses.length, 2);
 });
 
 test('consecutive perfects grow both dimensions from streak two and cap at the base size', () => {
-  const game = Object.create(GamePrototype);
+  const game = new gameSandbox.exports.StackGame();
   const block = { x: 0, z: 0, width: 4.5, depth: 4.7, level: 1, hue: 60 };
   game.perfectStreak = 1;
   assert.equal(game.growPerfectBlock(block), false);
@@ -1548,7 +1550,7 @@ test('reduced motion suppresses only the perfect visual pulse', () => {
   for (const reducedMotion of [false, true]) {
     let pulses = 0;
     let particles = 0;
-    const game = Object.create(GamePrototype);
+    const game = new gameSandbox.exports.StackGame();
     Object.assign(game, {
       reducedMotion, roundPerfectCount: 0, perfectStreak: 2, flashAlpha: 0,
       world3D: { pulsePerfect() { pulses += 1; } },
@@ -1569,7 +1571,7 @@ test('first cut conserves width/depth and settles before spawning debris without
     for (const delta of [-1.5, 1.5]) {
       const base = { x: 0, z: 0, width: 5, depth: 5, level: 0, hue: 60 };
       const placed = { ...base, [axis]: delta, level: 1 };
-      const game = Object.create(GamePrototype);
+      const game = new gameSandbox.exports.StackGame();
       const calls = [];
       let offcut;
       Object.assign(game, {
@@ -1587,5 +1589,174 @@ test('first cut conserves width/depth and settles before spawning debris without
       assert.equal(placed[dimension] + offcut[dimension], 5);
       assert.equal(game.spawnDelay, 0.24);
     }
+  }
+});
+
+
+test('drop initializes support before render sync and repairs non-finite or margin-offset positions', () => {
+  const { world, base, moving } = setup();
+  world.reset();
+  world.beginDrop(moving, base);
+  const support = world.blockNodes.get(base);
+  assert.equal(support.scale.x, 5, 'support is initialized even before render sync');
+  assert.equal(support.position.y, 0.31);
+  world.droppingNode.setPosition(NaN, NaN, NaN);
+  assert.equal(world.pollDrop(0.03), null);
+  assert.ok(Number.isFinite(world.droppingNode.position.x));
+  world.droppingNode.setPosition(0, 0.95, 0);
+  assert.equal(world.pollDrop(0.1), 'landed');
+  world.settle(moving);
+  assert.ok(Math.abs(world.blockNodes.get(moving).position.y - 0.93) < 1e-9);
+  assert.equal(world.pollDrop(0.1), null);
+  world.destroy();
+});
+
+test('incremental motion leaves all settled transforms untouched and restore preserves their colliders', () => {
+  const { world, base, moving } = setup();
+  const settled = Array.from({ length: 100 }, (_, level) => ({ ...base, level }));
+  const current = { ...moving, level: 100 };
+  world.restoreStack(settled, current);
+  const stableNodes = settled.map(block => world.blockNodes.get(block));
+  const originalTransforms = stableNodes.map(node => [node.position, node.scale]);
+  const originalColliders = stableNodes.map(node => node.getComponent(BoxCollider));
+  for (let index = 0; index < 120; index++) {
+    current.x = Math.sin(index / 20);
+    world.updateMovingBlock(current);
+    world.tick(1 / 60, 100, 0, 0);
+  }
+  stableNodes.forEach((node, index) => {
+    assert.equal(node.position, originalTransforms[index][0]);
+    assert.equal(node.scale, originalTransforms[index][1]);
+    assert.equal(node.getComponent(BoxCollider), originalColliders[index]);
+  });
+  assert.equal(world.blockNodes.get(current).position.x, current.x);
+  settled[99].width = 2.5;
+  world.updateSettledBlock(settled[99]);
+  assert.equal(stableNodes[99].scale.x, 2.5);
+  world.removeBlock(current);
+  assert.equal(world.blockNodes.has(current), false);
+  assert.equal(world.blockNodes.size, 100);
+  world.restoreStack(settled.slice(0, 3));
+  assert.equal(world.blockNodes.size, 3);
+  assert.ok(stableNodes.slice(3).every(node => !node.active));
+  world.destroy();
+});
+
+test('fragment prewarm handles 32 live pieces without creation and expands without dropping collisions', () => {
+  const { world, base } = setup();
+  assert.equal(world.fragmentPool.length, 32);
+  assert.equal(world.fragmentPoolCapacity, 32);
+  assert.equal(world.fragmentPoolAvailable, 32);
+  assert.equal(world.growthCount, 0);
+  const prewarmed = new Set(world.fragmentPool);
+  const initialViews = world.blockViews.size;
+  for (let index = 0; index < 32; index++) world.spawnFragment({ ...base, width: 0.2 }, 'x', 1);
+  assert.equal(world.blockViews.size, initialViews);
+  assert.ok([...world.looseNodes.keys()].every(node => prewarmed.has(node) && node.active));
+  for (let index = 0; index < 8; index++) world.spawnFragment({ ...base, width: 0.2 }, 'z', -1);
+  assert.equal(world.looseNodes.size, 40);
+  assert.equal(world.looseCount, 40);
+  assert.equal(world.fragmentPoolCapacity, 40);
+  assert.equal(world.fragmentPoolAvailable, 0);
+  assert.equal(world.growthCount, 8);
+  const peak = world.getDiagnostics();
+  assert.equal(Object.isFrozen(peak), true);
+  assert.equal(peak.activeBlocks, world.blockNodes.size);
+  assert.equal(world.blockViews.size, initialViews + 8);
+  const nodes = [...world.looseNodes.keys()];
+  world.setPresentationOpacity(0.4);
+  world.reset();
+  assert.equal(world.fragmentPool.length, 40);
+  assert.equal(world.fragmentPoolAvailable, 40);
+  assert.equal(world.activeBlocks, 0);
+  assert.equal(world.looseCount, 0);
+  assert.equal(peak.looseCount, 40, 'a diagnostic snapshot cannot change when the world resets');
+  assert.equal(world.growthCount, 8, 'new rounds retain lifetime pool growth evidence');
+  assert.ok(nodes.every(node => !node.active && node.isValid));
+  for (const node of nodes) {
+    const body = node.getComponent(RigidBody);
+    assert.equal(body.type, cc.ERigidBodyType.STATIC);
+    assert.equal(body.useGravity, false);
+    assert.equal(body.useCCD, false);
+    assert.deepEqual(body.velocity, Vec3.ZERO);
+    assert.deepEqual(body.angularVelocity, Vec3.ZERO);
+  }
+  world.setPresentationOpacity(1);
+  world.spawnFragment({ ...base, level: 5, width: 0.4, depth: 0.7 }, 'z', 1);
+  const reused = [...world.looseNodes.keys()][0];
+  assert.ok(nodes.includes(reused));
+  assert.equal(reused.scale.x, 0.4);
+  assert.equal(reused.scale.z, 0.7);
+  assert.equal(reused.getComponent(RigidBody).useCCD, true);
+  assert.equal(reused.getChildByName('BlockVisual').getComponent(MeshRenderer).material, world.blockMaterials.get(5));
+  world.destroy();
+  assert.equal(world.fragmentPoolCapacity, 0);
+  assert.equal(world.fragmentPoolAvailable, 0);
+});
+
+test('a frame prepares each camera and the UI matrix once while projections reuse caller output', () => {
+  const canvas = new Node('Canvas'); canvas.scene = new Node('Scene');
+  const camera = new Node('Camera'); camera.addComponent(Camera); canvas.addChild(camera);
+  const effects = new Node('Effects'); effects.addComponent(UITransform); effects.setPosition(10, 20, 0);
+  const world = new StackWorld3D(canvas, 0.62);
+  let worldUpdates = 0, uiUpdates = 0, matrixReads = 0;
+  world.camera.camera.update = () => { worldUpdates++; };
+  world.uiCamera.camera.update = () => { uiUpdates++; };
+  const getWorldMatrix = effects.getWorldMatrix.bind(effects);
+  effects.getWorldMatrix = out => { matrixReads++; return getWorldMatrix(out); };
+  const out = new Vec3();
+  world.prepareProjection(effects);
+  for (let index = 0; index < 236; index++) {
+    assert.equal(world.projectToUI(1, 0, 2, effects, out), out);
+    assert.equal(out.x, 90);
+    assert.equal(out.y, 104);
+  }
+  world.prepareProjection(effects);
+  assert.deepEqual([worldUpdates, uiUpdates, matrixReads], [1, 1, 1]);
+  world.tick(0, 0, 0, 0);
+  world.projectToUI(0, 0, 0, effects, out);
+  assert.deepEqual([worldUpdates, uiUpdates, matrixReads], [2, 2, 2]);
+  world.destroy();
+});
+
+test('idle camera ticks do not dirty transforms and paused resize still refreshes the backdrop', () => {
+  const { world } = setup();
+  let cameraWrites = 0, backgroundWrites = 0;
+  const cameraPosition = world.cameraNode.setPosition.bind(world.cameraNode);
+  world.cameraNode.setPosition = (...args) => { cameraWrites++; cameraPosition(...args); };
+  const backgroundScale = world.backgroundNode.setScale.bind(world.backgroundNode);
+  world.backgroundNode.setScale = (...args) => { backgroundWrites++; backgroundScale(...args); };
+  for (let index = 0; index < 120; index++) world.tick(1 / 60, 0, 0, 0);
+  assert.deepEqual([cameraWrites, backgroundWrites], [0, 0]);
+  const visible = cc.view.getVisibleSize;
+  try {
+    world.setPaused(true);
+    cc.view.getVisibleSize = () => ({ width: 1920, height: 1080 });
+    world.setCompositionOffset(0);
+    assert.deepEqual([cameraWrites, backgroundWrites], [0, 1]);
+    assert.equal(cc.PhysicsSystem.instance.enable, false);
+  } finally {
+    cc.view.getVisibleSize = visible;
+    world.destroy();
+  }
+});
+
+test('opaque instancing follows device support and transparency always disables it', () => {
+  const previousDirector = cc.director, previousGfx = cc.gfx;
+  try {
+    cc.gfx = { Feature: { INSTANCED_ARRAYS: 99 } };
+    for (const supported of [true, false]) {
+      cc.director = { root: { device: { hasFeature(feature) { assert.equal(feature, 99); return supported; } } } };
+      const { world, base } = setup();
+      assert.equal(world.instancingEnabled, supported);
+      assert.ok([...world.blockMaterials.values()].every(material => material.info.defines.USE_INSTANCING === supported));
+      world.setPresentationOpacity(0.5);
+      const fade = world.blockNodes.get(base).getChildByName('BlockVisual').getComponent(MeshRenderer).material;
+      assert.equal(fade.info.defines.USE_INSTANCING, false);
+      world.destroy();
+    }
+  } finally {
+    cc.director = previousDirector;
+    cc.gfx = previousGfx;
   }
 });

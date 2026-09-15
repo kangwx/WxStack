@@ -45,7 +45,7 @@ for (const [pixelWidth, pixelHeight] of displays) {
       assert.ok(p.titleY + p.titleSize * 0.65 <= p.panelHeight / 2 - 16);
       assert.ok(p.titleY - p.titleSize * 0.65 > p.subtitleY + p.captionFont * 0.65);
       if (kind !== 'leaderboard') assert.ok(focusHalf(p.buttonWidth) <= p.panelWidth / 2 - 16);
-      assert.equal(p.buttonYs.length, kind === 'leaderboard' ? 0 : kind === 'settings' ? 6 : 3);
+      assert.equal(p.buttonYs.length, kind === 'leaderboard' ? 0 : kind === 'settings' ? 7 : 3);
       const half = focusHalf(p.buttonHeight);
       p.buttonYs.forEach((y, index) => {
         assert.ok(y + half <= p.panelHeight / 2 - 16, `button ${index} top is safe`);

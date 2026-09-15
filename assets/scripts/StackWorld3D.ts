@@ -3,21 +3,23 @@ import {
   Camera,
   Color,
   DirectionalLight,
+  director,
   ERigidBodyType,
   Layers,
+  gfx,
   Material,
+  Mat4,
   Mesh,
   MeshRenderer,
   Node,
   PhysicsSystem,
   RigidBody,
-  UITransform,
   Vec3,
   primitives,
   utils,
   view,
 } from 'cc';
-import { CREAM_STYLE, RGB } from './CreamStyle';
+import { CREAM_STYLE, CREAM_BRIGHT_WORLD, CREAM_BRIGHT_COLOR_SCALE, CreamVariant, CreamWorldPalette, RGB } from './CreamStyle';
 
 export interface WorldBlockState {
   x: number;
@@ -28,6 +30,14 @@ export interface WorldBlockState {
 }
 
 export type DropResult = 'landed' | 'missed' | null;
+export interface WorldDiagnostics {
+  activeBlocks: number;
+  looseCount: number;
+  fragmentPoolCapacity: number;
+  fragmentPoolAvailable: number;
+  growthCount: number;
+  isInstancingEnabled: boolean;
+}
 
 const DEFAULT_LAYER = Layers.BitMask.DEFAULT;
 const UI_LAYER = Layers.BitMask.UI_2D;
@@ -35,12 +45,22 @@ const PROFILER_LAYER = Layers.BitMask.PROFILER;
 // Keep the moving block close to the landing surface so its footprint can be
 // compared directly with the block below, while retaining a short physical drop.
 const DROP_HEIGHT = 0.05;
-const DROP_MISS_DISTANCE = 2.2;
-const MAX_DROP_SECONDS = 2;
+const DROP_SECONDS = 0.09;
 const FRAGMENT_LIFETIME = 5;
 const BLOCK_VISUAL_NAME = 'BlockVisual';
 const PERFECT_PULSE_DURATION = 0.24;
 const BACKGROUND_BASE_DISTANCE = 38;
+const FRAGMENT_POOL_PREWARM = 32;
+
+interface BlockView {
+  visual: Node;
+  renderer: MeshRenderer;
+  body: RigidBody;
+  collider: BoxCollider;
+  pool: 'block' | 'fragment';
+}
+
+type ToyColor = Exclude<keyof CreamWorldPalette, 'blockPalette'> | number;
 
 /**
  * Owns the perspective camera, real meshes and Ammo rigid bodies used by the
@@ -57,26 +77,65 @@ export class StackWorld3D {
   private readonly blockNodes = new Map<WorldBlockState, Node>();
   private readonly looseNodes = new Map<Node, number>();
   private readonly perfectPulses = new Map<Node, number>();
+  private readonly blockViews = new Map<Node, BlockView>();
+  private readonly blockPool: Node[] = [];
+  private readonly fragmentPool: Node[] = [];
+  private fragmentCapacity = 0;
+  private fragmentGrowthCount = 0;
+  readonly instancingEnabled: boolean;
   private readonly blockMesh: Mesh;
   private readonly toyMaterials = new Set<Material>();
+  private readonly toyMaterialColors = new Map<Material, ToyColor>();
   private readonly blockMaterials = new Map<number, Material>();
   private readonly presentationMaterials = new Map<Material, { material: Material; color: Color }>();
   private presentationOpacity = 1;
   private readonly ownedMaterials = new Set<Material>();
+  private appearance: CreamVariant = 'standard';
+  private appearancePalette: CreamWorldPalette = CREAM_STYLE;
+  private appearanceColorScale = 1;
   private droppingBlock: WorldBlockState | null = null;
   private droppingNode: Node | null = null;
-  private dropCollider: BoxCollider | null = null;
-  private landingNode: Node | null = null;
-  private dropCollided = false;
   private dropElapsed = 0;
+  private dropOverlapsSupport = false;
   private cameraTargetY = 1.35;
   private cameraCurrentY = 1.35;
   private compositionOffsetX = 0;
   private homePresentation = false;
   private overviewTopLevel: number | null = null;
   private paused = false;
+  private projectionNode: Node | null = null;
+  private projectionReady = false;
+  private readonly projectionWorld = new Vec3();
+  private readonly projectionScreen = new Vec3();
+  private readonly projectionUI = new Vec3();
+  private readonly projectionInverse = new Mat4();
+  private readonly cameraTarget = new Vec3();
+  private lastCameraX = NaN;
+  private lastCameraY = NaN;
+  private lastCameraZ = NaN;
+  private lastFocusY = NaN;
+  private lastFocusX = NaN;
+  private backdropWidth = NaN;
+  private backdropHeight = NaN;
+  private backdropDistance = NaN;
+
+  get activeBlocks(): number { return this.blockNodes.size; }
+  get looseCount(): number { return this.looseNodes.size; }
+  get fragmentPoolCapacity(): number { return this.fragmentCapacity; }
+  get fragmentPoolAvailable(): number { return this.fragmentPool.length; }
+  /** Lifetime overflow allocations beyond the prewarmed fragment pool. */
+  get growthCount(): number { return this.fragmentGrowthCount; }
+  get isInstancingEnabled(): boolean { return this.instancingEnabled; }
+  /** Snapshot allocation is reserved for explicit diagnostics, not the frame loop. */
+  getDiagnostics(): Readonly<WorldDiagnostics> {
+    return Object.freeze({ activeBlocks: this.activeBlocks, looseCount: this.looseCount,
+      fragmentPoolCapacity: this.fragmentPoolCapacity, fragmentPoolAvailable: this.fragmentPoolAvailable,
+      growthCount: this.growthCount, isInstancingEnabled: this.isInstancingEnabled });
+  }
 
   constructor(canvasNode: Node, private readonly blockHeight: number) {
+    const device = director?.root?.device;
+    this.instancingEnabled = Boolean(gfx?.Feature && device?.hasFeature(gfx.Feature.INSTANCED_ARRAYS));
     const scene = canvasNode.scene;
     this.worldRoot = new Node('StackWorld3D');
     this.worldRoot.layer = DEFAULT_LAYER;
@@ -115,12 +174,23 @@ export class StackWorld3D {
     background.initialize({ effectName: 'builtin-unlit' });
     background.setProperty('mainColor', new Color(...CREAM_STYLE.backgroundColor));
     this.backgroundRenderer.setMaterial(background, 0);
+    // Use the camera clear color for a faithful cream backdrop; ACES tone mapping
+    // on the unlit plane would turn the same palette color gray.
+    this.backgroundRenderer.enabled = false;
     this.ownedMaterials.add(background);
     this.backgroundNode.active = true;
     for (let level = 0; level < CREAM_STYLE.blockPalette.length; level += 1) {
       this.materialForLevel(level);
     }
     this.createToyStage();
+    for (let index = 0; index < FRAGMENT_POOL_PREWARM; index += 1) {
+      const node = this.createBlockNode(`PooledFragment-${index}`, index, 'fragment');
+      // Trigger Cocos onLoad once so Ammo bodies are allocated before first impact.
+      // Disable synchronously before a rendered frame or physics step can see them.
+      node.active = true;
+      node.active = false;
+      this.fragmentPool.push(node);
+    }
 
     const lightNode = new Node('KeyLight');
     lightNode.layer = DEFAULT_LAYER;
@@ -153,6 +223,11 @@ export class StackWorld3D {
   }
 
   sync(stack: readonly WorldBlockState[], current: WorldBlockState | null): void {
+    this.restoreStack(stack, current);
+  }
+
+  /** Reconcile structure only on initial load, restore or truncation; never per frame. */
+  restoreStack(stack: readonly WorldBlockState[], current: WorldBlockState | null = null): void {
     const visible = new Set<WorldBlockState>(stack);
     if (current) {
       visible.add(current);
@@ -160,75 +235,82 @@ export class StackWorld3D {
 
     for (const [block, node] of this.blockNodes) {
       if (!visible.has(block) && block !== this.droppingBlock) {
-        this.perfectPulses.delete(node);
-        node.active = false;
-        node.destroy();
+        this.recycleBlockNode(node);
         this.blockNodes.delete(block);
       }
     }
 
     for (const block of stack) {
-      const node = this.ensureBlockNode(block);
-      this.makeStatic(node);
-      this.positionStableBlock(node, block);
+      this.updateSettledBlock(block);
     }
 
     if (current) {
-      const node = this.ensureBlockNode(current);
       if (current !== this.droppingBlock) {
-        this.makeKinematic(node);
-        node.setScale(current.width, this.blockHeight, current.depth);
-        node.setPosition(current.x, this.movingBlockY(current), current.z);
-        node.setRotationFromEuler(0, 0, 0);
+        this.spawnMovingBlock(current);
       }
     }
   }
 
-  beginDrop(block: WorldBlockState, support: WorldBlockState): void {
-    this.clearDropListener();
+  spawnMovingBlock(block: WorldBlockState): void {
     const node = this.ensureBlockNode(block);
-    // Input may arrive before the next render sync; release at the visible footprint.
+    this.makeKinematic(node);
+    node.setScale(block.width, this.blockHeight, block.depth);
+    node.setRotationFromEuler(0, 0, 0);
+    this.updateMovingBlock(block);
+  }
+
+  updateMovingBlock(block: WorldBlockState): void {
+    if (block === this.droppingBlock) return;
+    const node = this.blockNodes.get(block);
+    if (node) node.setPosition(block.x, this.movingBlockY(block), block.z);
+  }
+
+  updateSettledBlock(block: WorldBlockState): void {
+    const node = this.ensureBlockNode(block);
+    this.makeStatic(node);
+    this.positionStableBlock(node, block);
+  }
+
+  removeBlock(block: WorldBlockState): void {
+    const node = this.blockNodes.get(block);
+    if (!node) return;
+    if (this.droppingBlock === block) {
+      this.droppingBlock = null;
+      this.droppingNode = null;
+      this.dropElapsed = 0;
+      this.dropOverlapsSupport = false;
+    }
+    this.blockNodes.delete(block);
+    this.recycleBlockNode(node);
+  }
+
+  beginDrop(block: WorldBlockState, support: WorldBlockState): void {
+    const node = this.ensureBlockNode(block);
+    // Retained blocks are governed by footprint rules. Physics remains on detached pieces.
+    this.makeKinematic(node);
     node.setScale(block.width, this.blockHeight, block.depth);
     node.setPosition(block.x, this.movingBlockY(block), block.z);
-    const body = node.getComponent(RigidBody)!;
-    const collider = node.getComponent(BoxCollider)!;
+    node.setRotationFromEuler(0, 0, 0);
+    const supportNode = this.ensureBlockNode(support);
+    this.makeStatic(supportNode);
+    this.positionStableBlock(supportNode, support);
     this.droppingBlock = block;
     this.droppingNode = node;
-    this.dropCollider = collider;
-    this.landingNode = this.ensureBlockNode(support);
-    this.dropCollided = false;
+    this.dropOverlapsSupport = Math.abs(block.x - support.x) < (block.width + support.width) * 0.5
+      && Math.abs(block.z - support.z) < (block.depth + support.depth) * 0.5;
     this.dropElapsed = 0;
-
-    collider.on('onCollisionEnter', this.onDropCollision, this);
-    collider.on('onCollisionStay', this.onDropCollision, this);
-    body.type = ERigidBodyType.DYNAMIC;
-    body.mass = Math.max(0.45, block.width * block.depth * 0.07);
-    body.useCCD = true;
-    body.useGravity = true;
-    body.linearDamping = 0.06;
-    body.angularDamping = 0.92;
-    body.linearFactor = new Vec3(0, 1, 0);
-    body.angularFactor = new Vec3(0, 0, 0);
-    body.setLinearVelocity(new Vec3(0, -0.8, 0));
-    body.setAngularVelocity(Vec3.ZERO);
-    body.wakeUp();
   }
 
   pollDrop(dt: number): DropResult {
-    if (!this.droppingBlock || !this.droppingNode) {
-      return null;
-    }
-    this.dropElapsed += dt;
-    if (this.dropCollided) {
-      return 'landed';
-    }
-
-    const targetY = this.stableBlockY(this.droppingBlock);
-    if (this.droppingNode.position.y < targetY - DROP_MISS_DISTANCE
-      || this.dropElapsed >= MAX_DROP_SECONDS) {
-      return 'missed';
-    }
-    return null;
+    if (!this.droppingBlock || !this.droppingNode) return null;
+    if (this.paused) return null;
+    this.dropElapsed += Number.isFinite(dt) ? Math.max(0, dt) : 0;
+    const progress = Math.min(1, this.dropElapsed / DROP_SECONDS);
+    const block = this.droppingBlock;
+    const y = this.stableBlockY(block) + DROP_HEIGHT * (1 - progress * progress);
+    this.droppingNode.setPosition(block.x, y, block.z);
+    if (progress < 1) return null;
+    return this.dropOverlapsSupport ? 'landed' : 'missed';
   }
 
   settle(block: WorldBlockState): void {
@@ -236,10 +318,8 @@ export class StackWorld3D {
     if (!node) {
       return;
     }
-    this.clearDropListener();
     this.droppingBlock = null;
     this.droppingNode = null;
-    this.dropCollided = false;
     this.makeStatic(node);
     this.positionStableBlock(node, block);
   }
@@ -258,12 +338,11 @@ export class StackWorld3D {
     if (!node) {
       return;
     }
-    this.clearDropListener();
     this.droppingBlock = null;
     this.droppingNode = null;
     this.blockNodes.delete(block);
     this.looseNodes.set(node, 0);
-    const body = node.getComponent(RigidBody)!;
+    const body = this.blockViews.get(node)!.body;
     body.type = ERigidBodyType.DYNAMIC;
     body.useCCD = true;
     body.useGravity = true;
@@ -280,7 +359,7 @@ export class StackWorld3D {
     if (fragment.width <= 0.015 || fragment.depth <= 0.015) {
       return;
     }
-    const node = this.createBlockNode(`CutFragment-${fragment.level}`, fragment.level);
+    const node = this.acquireBlockNode(`CutFragment-${fragment.level}`, fragment.level, 'fragment');
     this.looseNodes.set(node, 0);
     node.setScale(fragment.width, this.blockHeight, fragment.depth);
     const sign = Math.sign(direction || 1);
@@ -290,7 +369,7 @@ export class StackWorld3D {
       this.stableBlockY(fragment) + 0.03,
       fragment.z + (axis === 'z' ? sign * 0.045 : 0),
     );
-    const body = node.getComponent(RigidBody)!;
+    const body = this.blockViews.get(node)!.body;
     body.type = ERigidBodyType.DYNAMIC;
     body.mass = Math.max(0.18, fragment.width * fragment.depth * 0.06);
     body.useCCD = true;
@@ -306,6 +385,7 @@ export class StackWorld3D {
   }
 
   tick(dt: number, topLevel: number, shakeX: number, shakeY: number): void {
+    this.projectionReady = false;
     this.cameraTargetY = this.overviewTopLevel === null
       ? Math.max(1.35, topLevel * this.blockHeight - 1.15)
       : Math.max(0.9, (this.overviewTopLevel + 1) * this.blockHeight * 0.5);
@@ -323,8 +403,7 @@ export class StackWorld3D {
       if (!node.isValid || node.position.y < -18 || age + dt >= FRAGMENT_LIFETIME) {
         this.looseNodes.delete(node);
         if (node.isValid) {
-          node.active = false;
-          node.destroy();
+          this.recycleBlockNode(node);
         }
       }
     }
@@ -357,6 +436,42 @@ export class StackWorld3D {
     PhysicsSystem.instance.enable = !paused;
   }
 
+  /** Recolor existing shared materials without replacing meshes or game state. */
+  setAppearance(variant: CreamVariant): void {
+    const next = variant === 'bright' ? 'bright' : 'standard';
+    if (next === this.appearance) return;
+    this.appearance = next;
+    this.appearancePalette = next === 'bright' ? CREAM_BRIGHT_WORLD : CREAM_STYLE;
+    this.appearanceColorScale = next === 'bright' ? CREAM_BRIGHT_COLOR_SCALE : 1;
+    for (const [level, material] of this.blockMaterials) {
+      this.updateMaterialAppearance(material, this.appearancePalette.blockPalette[level]);
+    }
+    for (const [material, color] of this.toyMaterialColors) {
+      this.updateMaterialAppearance(material, this.toyColor(color));
+    }
+    // Both visible and pooled fragments use the same eight block materials.
+    // Update cached transparent copies too, including a transition at opacity 0.
+    for (const [opaque, entry] of this.presentationMaterials) {
+      const color = opaque.getProperty('mainColor') as Color;
+      entry.color = color;
+      entry.material.setProperty('mainColor', new Color(color.r, color.g, color.b,
+        Math.round(color.a * this.presentationOpacity)));
+      entry.material.setProperty('colorScale', new Vec3(this.appearanceColorScale,
+        this.appearanceColorScale, this.appearanceColorScale));
+    }
+  }
+
+  private updateMaterialAppearance(material: Material, rgb: RGB): void {
+    material.setProperty('mainColor', new Color(...rgb));
+    material.setProperty('colorScale', new Vec3(this.appearanceColorScale,
+      this.appearanceColorScale, this.appearanceColorScale));
+  }
+
+  private toyColor(color: ToyColor): RGB {
+    return typeof color === 'number' ? this.appearancePalette.blockPalette[color]
+      : this.appearancePalette[color];
+  }
+
   /** Render-only fade: the cream background, rigid bodies and camera stay intact. */
   setPresentationOpacity(opacity: number): void {
     const next = Number.isFinite(opacity) ? Math.max(0, Math.min(1, opacity)) : 1;
@@ -385,9 +500,11 @@ export class StackWorld3D {
       // never a full-screen pass and never a material allocation per frame.
       material.initialize({
         effectName: 'builtin-unlit', technique: 1,
-        defines: { USE_VERTEX_COLOR: true },
+        defines: { USE_VERTEX_COLOR: true, USE_INSTANCING: false },
       });
       material.setProperty('mainColor', new Color(color.r, color.g, color.b, Math.round(color.a * this.presentationOpacity)));
+      material.setProperty('colorScale', new Vec3(this.appearanceColorScale,
+        this.appearanceColorScale, this.appearanceColorScale));
       entry = { material, color };
       this.presentationMaterials.set(opaque, entry);
       this.ownedMaterials.add(material);
@@ -398,19 +515,16 @@ export class StackWorld3D {
   reset(): void {
     // Keep presentationOpacity and homePresentation across resets: the caller
     // controls the destination framing while incoming meshes remain invisible.
-    this.clearDropListener();
     this.droppingBlock = null;
     this.droppingNode = null;
-    this.dropCollided = false;
+    this.dropOverlapsSupport = false;
     this.dropElapsed = 0;
     for (const node of this.blockNodes.values()) {
-      node.active = false;
-      node.destroy();
+      this.recycleBlockNode(node);
     }
     for (const node of this.looseNodes.keys()) {
       if (node.isValid) {
-        node.active = false;
-        node.destroy();
+        this.recycleBlockNode(node);
       }
     }
     this.blockNodes.clear();
@@ -431,6 +545,7 @@ export class StackWorld3D {
     this.blockMesh.destroy();
     for (const material of this.toyMaterials) material.destroy();
     this.toyMaterials.clear();
+    this.toyMaterialColors.clear();
     for (const material of this.ownedMaterials) {
       material.destroy();
     }
@@ -438,34 +553,66 @@ export class StackWorld3D {
     this.ownedMaterials.clear();
     this.presentationMaterials.clear();
     this.worldRoot.destroy();
-  }
-
-  private onDropCollision(event: { otherCollider?: BoxCollider }): void {
-    // A falling fragment or a lower tier must never count as the target landing.
-    if (event.otherCollider?.node === this.landingNode && this.droppingBlock
-      && this.droppingNode!.position.y >= this.stableBlockY(this.droppingBlock) - 0.1) {
-      this.dropCollided = true;
-    }
-  }
-
-  private clearDropListener(): void {
-    this.dropCollider?.off('onCollisionEnter', this.onDropCollision, this);
-    this.dropCollider?.off('onCollisionStay', this.onDropCollision, this);
-    this.dropCollider = null;
-    this.landingNode = null;
+    this.blockViews.clear();
+    this.blockPool.length = 0;
+    this.fragmentPool.length = 0;
+    this.fragmentCapacity = 0;
+    this.projectionNode = null;
   }
 
   private ensureBlockNode(block: WorldBlockState): Node {
     let node = this.blockNodes.get(block);
     if (!node?.isValid) {
-      node = this.createBlockNode(`StackBlock-${block.level}`, block.level);
+      node = this.acquireBlockNode(`StackBlock-${block.level}`, block.level, 'block');
       this.blockNodes.set(block, node);
     }
     return node;
   }
 
-  private createBlockNode(name: string, level: number): Node {
+  private acquireBlockNode(name: string, level: number, pool: BlockView['pool']): Node {
+    const nodes = pool === 'fragment' ? this.fragmentPool : this.blockPool;
+    let node = nodes.pop();
+    while (node && !node.isValid) {
+      this.blockViews.delete(node);
+      if (pool === 'fragment') this.fragmentCapacity--;
+      node = nodes.pop();
+    }
+    if (!node) {
+      node = this.createBlockNode(name, level, pool);
+      if (pool === 'fragment') this.fragmentGrowthCount++;
+    }
+    node.name = name;
+    this.applyBlockMaterial(node, level);
+    node.active = true;
+    return node;
+  }
+
+  private recycleBlockNode(node: Node): void {
+    node.active = false;
+    this.perfectPulses.delete(node);
+    const entry = this.blockViews.get(node);
+    if (!entry) return;
+    const body = entry.body;
+    body.setLinearVelocity(Vec3.ZERO);
+    body.setAngularVelocity(Vec3.ZERO);
+    body.type = ERigidBodyType.STATIC;
+    body.useGravity = false;
+    body.useCCD = false;
+    body.mass = 1;
+    body.linearDamping = 0;
+    body.angularDamping = 0;
+    body.linearFactor = Vec3.ONE;
+    body.angularFactor = Vec3.ONE;
+    entry.visual.setScale(1, 1, 1);
+    node.setRotationFromEuler(0, 0, 0);
+    const pool = entry.pool === 'fragment' ? this.fragmentPool : this.blockPool;
+    pool.push(node);
+  }
+
+  private createBlockNode(name: string, level: number, pool: BlockView['pool']): Node {
+    if (pool === 'fragment') this.fragmentCapacity++;
     const node = new Node(name);
+    node.active = false;
     node.layer = DEFAULT_LAYER;
     this.blockRoot.addChild(node);
     const visual = new Node(BLOCK_VISUAL_NAME);
@@ -479,17 +626,14 @@ export class StackWorld3D {
     const body = node.addComponent(RigidBody);
     body.type = ERigidBodyType.STATIC;
     body.useGravity = false;
+    this.blockViews.set(node, { visual, renderer, body, collider, pool });
     this.applyBlockMaterial(node, level);
     return node;
   }
 
   private applyBlockMaterial(node: Node, level: number): void {
-    const renderer = this.blockVisual(node).getComponent(MeshRenderer);
-    if (renderer) {
-      renderer.mesh = this.blockMesh;
-      renderer.setMaterial(this.presentationMaterial(this.materialForLevel(level)), 0);
-    }
-    const visual = this.blockVisual(node);
+    const { renderer, visual } = this.blockViews.get(node)!;
+    renderer.setMaterial(this.presentationMaterial(this.materialForLevel(level)), 0);
     visual.active = this.presentationOpacity > 0;
   }
 
@@ -503,9 +647,9 @@ export class StackWorld3D {
     const material = new Material(`StackBlockMaterial-${colorIndex}`);
     material.initialize({
       effectName: 'builtin-unlit',
-      defines: { USE_VERTEX_COLOR: true },
+      defines: { USE_VERTEX_COLOR: true, USE_INSTANCING: this.instancingEnabled },
     });
-    material.setProperty('mainColor', new Color(...CREAM_STYLE.blockPalette[colorIndex]));
+    this.updateMaterialAppearance(material, this.appearancePalette.blockPalette[colorIndex]);
     this.blockMaterials.set(colorIndex, material);
     this.ownedMaterials.add(material);
     return material;
@@ -517,15 +661,16 @@ export class StackWorld3D {
     root.layer = DEFAULT_LAYER;
     this.worldRoot.addChild(root);
     const materials = new Map<string, Material>();
-    const part = (name: string, position: number[], size: number[], rgb: RGB, solid = false) => {
-      const key = rgb.join(',');
+    const part = (name: string, position: number[], size: number[], color: ToyColor, solid = false) => {
+      const key = String(color);
       let material = materials.get(key);
       if (!material) {
         material = new Material(name);
         material.initialize({ effectName: 'builtin-unlit', defines: { USE_VERTEX_COLOR: true } });
-        material.setProperty('mainColor', new Color(rgb[0], rgb[1], rgb[2]));
+        this.updateMaterialAppearance(material, this.toyColor(color));
         materials.set(key, material);
         this.toyMaterials.add(material);
+        this.toyMaterialColors.set(material, color);
       }
       const node = new Node(name);
       node.layer = DEFAULT_LAYER;
@@ -545,10 +690,10 @@ export class StackWorld3D {
         collider.size = Vec3.ONE;
       }
     };
-    part('TableShadow', [0.18, -0.64, 0.2], [9.6, 0.08, 9.6], CREAM_STYLE.stageShadow);
-    part('RoseTableEdge', [0, -0.42, 0], [9.2, 0.36, 9.2], CREAM_STYLE.tableEdge);
-    part('CreamTableTop', [0, -0.2, 0], [9.2, 0.12, 9.2], CREAM_STYLE.tableTop);
-    part('TowerPlinth', [0, -0.06, 0], [5.55, 0.16, 5.55], CREAM_STYLE.plinth, true);
+    part('TableShadow', [0.18, -0.64, 0.2], [9.6, 0.08, 9.6], 'stageShadow');
+    part('RoseTableEdge', [0, -0.42, 0], [9.2, 0.36, 9.2], 'tableEdge');
+    part('CreamTableTop', [0, -0.2, 0], [9.2, 0.12, 9.2], 'tableTop');
+    part('TowerPlinth', [0, -0.06, 0], [5.55, 0.16, 5.55], 'plinth', true);
     // One thick static box covers the cream surface and pink edge. Its top is
     // exactly y = -0.14; it follows the stage's visibility and lifetime.
     const table = new Node('TableCollision');
@@ -566,8 +711,8 @@ export class StackWorld3D {
       [-1.5, 3.65, 0.42, 2], [1.65, 3.65, 0.65, 3],
     ];
     toys.forEach(([x, z, h, colorIndex], i) => {
-      part(`PastelToy-${i}`, [x, -0.14 + h / 2, z], [0.62, h, 0.62], CREAM_STYLE.blockPalette[colorIndex], true);
-      part(`ToyInlay-${i}`, [x, h * 0.42 - 0.14, z + 0.313], [0.38, 0.035, 0.008], CREAM_STYLE.toyInlay);
+      part(`PastelToy-${i}`, [x, -0.14 + h / 2, z], [0.62, h, 0.62], colorIndex, true);
+      part(`ToyInlay-${i}`, [x, h * 0.42 - 0.14, z + 0.313], [0.38, 0.035, 0.008], 'toyInlay');
     });
   }
 
@@ -628,7 +773,7 @@ export class StackWorld3D {
   }
 
   private blockVisual(node: Node): Node {
-    return node.getChildByName(BLOCK_VISUAL_NAME) ?? node;
+    return this.blockViews.get(node)?.visual ?? node;
   }
 
   private updatePerfectPulses(dt: number): void {
@@ -660,7 +805,7 @@ export class StackWorld3D {
   }
 
   private makeStatic(node: Node): void {
-    const body = node.getComponent(RigidBody)!;
+    const body = this.blockViews.get(node)!.body;
     if (body.type !== ERigidBodyType.STATIC) {
       body.setLinearVelocity(Vec3.ZERO);
       body.setAngularVelocity(Vec3.ZERO);
@@ -672,14 +817,14 @@ export class StackWorld3D {
   }
 
   private makeKinematic(node: Node): void {
-    const body = node.getComponent(RigidBody)!;
+    const body = this.blockViews.get(node)!.body;
     if (body.type !== ERigidBodyType.KINEMATIC) {
       body.setLinearVelocity(Vec3.ZERO);
       body.setAngularVelocity(Vec3.ZERO);
       body.type = ERigidBodyType.KINEMATIC;
     }
     body.useGravity = false;
-    body.linearFactor = new Vec3(0, 1, 0);
+    body.linearFactor = Vec3.UP;
     body.angularFactor = Vec3.ZERO;
   }
 
@@ -697,19 +842,29 @@ export class StackWorld3D {
     return this.stableBlockY(block) + DROP_HEIGHT;
   }
 
-  projectToUI(x: number, z: number, level: number, uiNode: Node): Vec3 {
-    // Refresh matrices before projecting: effects render in the same frame as follow/shake.
+  /** Call after camera/UI layout updates and before projecting any effects in a frame. */
+  prepareProjection(uiNode: Node): void {
+    if (this.projectionReady && this.projectionNode === uiNode) return;
     this.camera.camera?.update();
-    const screenPoint = this.camera.worldToScreen(new Vec3(x, level * this.blockHeight, z));
+    this.uiCamera?.camera?.update();
+    uiNode.getWorldMatrix(this.projectionInverse);
+    Mat4.invert(this.projectionInverse, this.projectionInverse);
+    this.projectionNode = uiNode;
+    this.projectionReady = true;
+  }
+
+  projectToUI(x: number, z: number, level: number, uiNode: Node, out: Vec3 = new Vec3()): Vec3 {
+    if (!this.projectionReady || this.projectionNode !== uiNode) this.prepareProjection(uiNode);
+    this.projectionWorld.set(x, level * this.blockHeight, z);
+    this.camera.worldToScreen(this.projectionWorld, this.projectionScreen);
     if (this.uiCamera) {
-      this.uiCamera.camera?.update();
-      const worldPoint = this.uiCamera.screenToWorld(screenPoint);
-      return uiNode.getComponent(UITransform)!.convertToNodeSpaceAR(worldPoint);
+      this.uiCamera.screenToWorld(this.projectionScreen, this.projectionUI);
+      return Vec3.transformMat4(out, this.projectionUI, this.projectionInverse);
     }
     const visible = view.getVisibleSize();
-    return new Vec3(
-      (screenPoint.x / this.camera.camera.width - 0.5) * visible.width,
-      (screenPoint.y / this.camera.camera.height - 0.5) * visible.height,
+    return out.set(
+      (this.projectionScreen.x / this.camera.camera.width - 0.5) * visible.width,
+      (this.projectionScreen.y / this.camera.camera.height - 0.5) * visible.height,
       0,
     );
   }
@@ -721,13 +876,21 @@ export class StackWorld3D {
       * (this.homePresentation ? 1.36 : 1.08);
     // The home still life includes the whole tabletop, not just the tower top.
     const focusY = this.cameraCurrentY - (this.homePresentation ? 0.85 : 0);
-    const target = new Vec3(this.compositionOffsetX, focusY, 0);
-    this.cameraNode.setPosition(
-      10.8 * overviewScale + this.compositionOffsetX + sx,
-      focusY + 9.2 * overviewScale + sy,
-      13.6 * overviewScale,
-    );
-    this.cameraNode.lookAt(target, Vec3.UP);
+    const x = 10.8 * overviewScale + this.compositionOffsetX + sx;
+    const y = focusY + 9.2 * overviewScale + sy;
+    const z = 13.6 * overviewScale;
+    if (x !== this.lastCameraX || y !== this.lastCameraY || z !== this.lastCameraZ
+      || focusY !== this.lastFocusY || this.compositionOffsetX !== this.lastFocusX) {
+      this.cameraNode.setPosition(x, y, z);
+      this.cameraTarget.set(this.compositionOffsetX, focusY, 0);
+      this.cameraNode.lookAt(this.cameraTarget, Vec3.UP);
+      this.lastCameraX = x;
+      this.lastCameraY = y;
+      this.lastCameraZ = z;
+      this.lastFocusY = focusY;
+      this.lastFocusX = this.compositionOffsetX;
+      this.projectionReady = false;
+    }
     this.updateBackdropTransform();
   }
 
@@ -739,9 +902,16 @@ export class StackWorld3D {
     // The backdrop is camera-local. Move it with the overview camera so tall
     // towers never pass behind it when the camera pulls back.
     const backgroundDistance = BACKGROUND_BASE_DISTANCE * this.cameraOverviewScale();
-    this.backgroundNode.setPosition(0, 0, -backgroundDistance);
     const height = 2 * backgroundDistance * Math.tan(this.camera.fov * Math.PI / 360);
-    this.backgroundNode.setScale(height * viewportAspect, height, 0.04);
+    const width = height * viewportAspect;
+    if (width !== this.backdropWidth || height !== this.backdropHeight || backgroundDistance !== this.backdropDistance) {
+      this.backgroundNode.setPosition(0, 0, -backgroundDistance);
+      this.backgroundNode.setScale(width, height, 0.04);
+      this.backdropWidth = width;
+      this.backdropHeight = height;
+      this.backdropDistance = backgroundDistance;
+      this.projectionReady = false;
+    }
   }
 
   private cameraOverviewScale(): number {

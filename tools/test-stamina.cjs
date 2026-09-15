@@ -51,7 +51,9 @@ test('midnight keeps the fixed interval and legacy saves preserve their balance'
   assert.equal(stamina.snapshot(midnight).amount, 0);
   assert.equal(stamina.snapshot(midnight).nextAt, night + interval);
   assert.equal(stamina.snapshot(night + interval).amount, 1);
-  stamina.restore();
+  stamina.grantAdReward(night + interval);
+  assert.equal(stamina.snapshot(night + interval).amount, 6);
+  stamina.spend(night + interval);
   assert.equal(stamina.snapshot(night + interval).amount, 5);
   assert.equal(stamina.snapshot(night + interval).nextAt, null);
   stamina.spend(night + interval);
@@ -60,7 +62,7 @@ test('midnight keeps the fixed interval and legacy saves preserve their balance'
 });
 
 test('corrupt or unavailable storage does not stop playing or touch other saves', () => {
-  for (const raw of ['broken', 'null', '{}', '{"amount":-1}', '{"amount":99}']) {
+  for (const raw of ['broken', 'null', '{}', '{"amount":-1}', '{"amount":99,"nextAt":1}']) {
     const store = storage();
     store.values.set(key, raw);
     store.values.set('wxstack-coins', '123');
@@ -86,7 +88,7 @@ test('only accepted new rounds spend stamina; repeated input and rejected starts
   const stamina = new Stamina(storage());
   let starts = 0;
   const game = { stamina, phase: 'ready', audioReady: true, homeOverlay: 'none', testModeEnabled: false,
-    updateAudioPrompt() {}, updateStaminaUI() {},
+    updateAudioPrompt() {}, updateStaminaUI() {}, openStaminaReward() {},
     beginScreenTransition() { starts++; this.homeTransition = {}; } };
   const start = () => context.startGame.call(game);
   game.audioReady = false; start();
@@ -107,26 +109,53 @@ test('only accepted new rounds spend stamina; repeated input and rejected starts
   assert.equal(stamina.snapshot().amount, 0);
 });
 
-test('settings restore fills and persists stamina without spending coins or starting a round', () => {
+test('settings recovery opens an ad without granting stamina before completion', () => {
   const source = fs.readFileSync(path.join(__dirname, '../assets/scripts/StackGame.ts'), 'utf8');
-  const method = source.slice(source.indexOf('  private onRestoreStamina():'), source.indexOf('  private moveSettingsSelection'));
-  const context = { Stamina, sys: { localStorage: storage() } };
+  const method = source.slice(source.indexOf('  private onRestoreStamina():'), source.indexOf('  private onAppearanceToggle'));
+  const context = {};
   vm.runInNewContext(ts.transpileModule(method.replace('private onRestoreStamina', 'function onRestoreStamina'), {
     compilerOptions: { target: ts.ScriptTarget.ES2020 },
   }).outputText, context);
-  const store = storage();
-  const stamina = new Stamina(store);
-  stamina.spend();
-  let updates = 0;
-  const game = { stamina, homeOverlay: 'none', coins: 100, phase: 'ready',
-    updateStaminaUI() { updates++; }, updateSettingsUI() { updates++; } };
-  context.onRestoreStamina.call(game);
-  assert.equal(stamina.snapshot().amount, 4);
-  game.homeOverlay = 'settings';
-  context.onRestoreStamina.call(game);
-  assert.equal(new Stamina(store).snapshot().amount, 5);
-  assert.equal(stamina.snapshot().nextAt, null);
-  assert.equal(game.coins, 100);
-  assert.equal(game.phase, 'ready');
-  assert.equal(updates, 2);
+  const stamina = new Stamina(storage()); stamina.spend();
+  let opened = 0;
+  const game = { stamina, homeOverlay: 'none', openStaminaReward() { opened++; } };
+  context.onRestoreStamina.call(game);assert.equal(opened,0);
+  game.homeOverlay='settings';context.onRestoreStamina.call(game);
+  assert.equal(opened,1);assert.equal(stamina.snapshot().amount,4);
+});
+
+
+test('ads add five points without a cap and bonus balances survive reload and offline time', () => {
+  for (const initial of [0, 1, 4, 5, 8, 10, 15, 100, 10000]) {
+    const store = storage();
+    store.values.set(key, JSON.stringify({amount: initial, nextAt: initial < 5 ? morning + interval : null}));
+    const stamina = new Stamina(store, morning);
+    stamina.grantAdReward(morning);
+    const expected = initial + 5;
+    assert.equal(stamina.snapshot(morning).amount, expected);
+    const reloaded = new Stamina(store, morning + interval * 100);
+    assert.equal(reloaded.snapshot(morning + interval * 100).amount, expected);
+    assert.equal(reloaded.snapshot(morning + interval * 100).nextAt, null);
+  }
+});
+
+test('bonus spending starts the natural timer only when crossing from five to four', () => {
+  const stamina = new Stamina(storage(), morning);
+  stamina.grantAdReward(morning);
+  for (let i = 0; i < 5; i++) {
+    stamina.spend(morning);
+    assert.equal(stamina.snapshot(morning).nextAt, null);
+  }
+  stamina.spend(morning + interval);
+  assert.equal(stamina.snapshot(morning + interval).amount, 4);
+  assert.equal(stamina.snapshot(morning + interval).nextAt, morning + interval * 2);
+  assert.equal(stamina.snapshot(morning + interval * 20).amount, 5);
+});
+
+test('ad completion reconciles elapsed natural recovery before adding its reward', () => {
+  const stamina = new Stamina(storage(), morning);
+  stamina.spend(morning); stamina.spend(morning);
+  stamina.grantAdReward(morning + interval);
+  assert.equal(stamina.snapshot(morning + interval).amount, 9);
+  assert.equal(stamina.snapshot(morning + interval).nextAt, null);
 });

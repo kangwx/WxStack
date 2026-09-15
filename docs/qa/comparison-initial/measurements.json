@@ -1,0 +1,333 @@
+{
+  "reviewedAt": "2026-09-14T11:12:13.707Z",
+  "cases": [
+    {
+      "screen": "home",
+      "before": "docs/qa/baseline/1920x1080-home.png",
+      "after": "docs/qa/comparison-initial/home-1920x1080.png",
+      "afterSHA256": "7892e4af70de514bef8abc896d525e5ffb7682d799e8b21beca4d3ebc144f27e",
+      "pixels": [
+        {
+          "x": 100,
+          "y": 500,
+          "before": [
+            255,
+            248,
+            231,
+            255
+          ],
+          "after": [
+            255,
+            248,
+            231,
+            255
+          ]
+        },
+        {
+          "x": 400,
+          "y": 580,
+          "before": [
+            173,
+            206,
+            196,
+            255
+          ],
+          "after": [
+            173,
+            206,
+            196,
+            255
+          ]
+        },
+        {
+          "x": 200,
+          "y": 430,
+          "before": [
+            243,
+            236,
+            220,
+            255
+          ],
+          "after": [
+            243,
+            236,
+            220,
+            255
+          ]
+        },
+        {
+          "x": 200,
+          "y": 411,
+          "before": [
+            244,
+            237,
+            221,
+            255
+          ],
+          "after": [
+            230,
+            224,
+            209,
+            255
+          ]
+        },
+        {
+          "x": 1525,
+          "y": 435,
+          "before": [
+            220,
+            235,
+            222,
+            255
+          ],
+          "after": [
+            255,
+            248,
+            231,
+            255
+          ]
+        },
+        {
+          "x": 1640,
+          "y": 450,
+          "before": [
+            162,
+            164,
+            161,
+            255
+          ],
+          "after": [
+            162,
+            164,
+            161,
+            255
+          ]
+        },
+        {
+          "x": 1000,
+          "y": 430,
+          "before": [
+            200,
+            190,
+            188,
+            255
+          ],
+          "after": [
+            200,
+            190,
+            188,
+            255
+          ]
+        }
+      ],
+      "titleProbe": {
+        "rectangle": [
+          200,
+          195,
+          410,
+          120
+        ],
+        "changedPixels": 0,
+        "totalPixels": 49200
+      }
+    },
+    {
+      "screen": "settings",
+      "before": "docs/qa/baseline/1920x1080-settings.png",
+      "after": "docs/qa/comparison-initial/settings-1920x1080.png",
+      "afterSHA256": "7de75ab1bdd983a19afb4cbbb5bcb886a45604d86c912ee86b738079ca4ce945",
+      "pixels": [
+        {
+          "x": 100,
+          "y": 500,
+          "before": [
+            255,
+            248,
+            231,
+            255
+          ],
+          "after": [
+            255,
+            248,
+            231,
+            255
+          ]
+        },
+        {
+          "x": 800,
+          "y": 700,
+          "before": [
+            182,
+            179,
+            169,
+            255
+          ],
+          "after": [
+            182,
+            179,
+            169,
+            255
+          ]
+        }
+      ],
+      "titleProbe": {
+        "rectangle": [
+          230,
+          215,
+          360,
+          80
+        ],
+        "changedPixels": 0,
+        "totalPixels": 28800
+      }
+    },
+    {
+      "screen": "nickname",
+      "before": "docs/qa/baseline/1920x1080-nickname.png",
+      "after": "docs/qa/comparison-initial/nickname-1920x1080.png",
+      "afterSHA256": "86e53e62e798cc4c232bfd743aa5e746425704b2261070f68100ab9c1cb72511",
+      "pixels": [
+        {
+          "x": 100,
+          "y": 500,
+          "before": [
+            172,
+            165,
+            164,
+            255
+          ],
+          "after": [
+            172,
+            165,
+            164,
+            255
+          ]
+        },
+        {
+          "x": 800,
+          "y": 700,
+          "before": [
+            255,
+            248,
+            231,
+            255
+          ],
+          "after": [
+            255,
+            248,
+            231,
+            255
+          ]
+        }
+      ],
+      "titleProbe": {
+        "rectangle": [
+          860,
+          375,
+          215,
+          50
+        ],
+        "changedPixels": 0,
+        "totalPixels": 10750
+      }
+    },
+    {
+      "screen": "leaderboard-empty",
+      "before": "docs/qa/baseline/1920x1080-leaderboard-empty.png",
+      "after": "docs/qa/comparison-initial/leaderboard-empty-1920x1080.png",
+      "afterSHA256": "79537197cf83e620ce8d30404f00ba30b57e807d0bb962a0a69a7c378fbce3ff",
+      "pixels": [
+        {
+          "x": 500,
+          "y": 400,
+          "before": [
+            255,
+            248,
+            231,
+            255
+          ],
+          "after": [
+            255,
+            248,
+            231,
+            255
+          ]
+        },
+        {
+          "x": 535,
+          "y": 350,
+          "before": [
+            247,
+            237,
+            220,
+            255
+          ],
+          "after": [
+            255,
+            248,
+            231,
+            255
+          ]
+        },
+        {
+          "x": 960,
+          "y": 700,
+          "before": [
+            247,
+            237,
+            220,
+            255
+          ],
+          "after": [
+            247,
+            237,
+            220,
+            255
+          ]
+        },
+        {
+          "x": 550,
+          "y": 265,
+          "before": [
+            246,
+            236,
+            219,
+            255
+          ],
+          "after": [
+            254,
+            247,
+            230,
+            255
+          ]
+        },
+        {
+          "x": 1390,
+          "y": 910,
+          "before": [
+            247,
+            237,
+            220,
+            255
+          ],
+          "after": [
+            255,
+            248,
+            231,
+            255
+          ]
+        }
+      ],
+      "titleProbe": {
+        "rectangle": [
+          510,
+          110,
+          235,
+          80
+        ],
+        "changedPixels": 0,
+        "totalPixels": 18800
+      }
+    }
+  ]
+}

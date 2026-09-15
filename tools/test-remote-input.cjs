@@ -54,14 +54,18 @@ test('remote keys route through home, settings, ranking, play, pause and results
   };
   vm.runInNewContext(ts.transpileModule(method.replace('private handleKeyDownCode', 'function handleKeyDownCode'), {}).outputText, runtime);
   const calls = [];
-  const state = { heldKeys: new Set(), homeOverlay:'none', phase:'ready', resultSelection:0 };
+  const inputModule = { exports:{} };
+  vm.runInNewContext(ts.transpileModule(fs.readFileSync('assets/scripts/ui/UIInputRouter.ts','utf8'), {
+    compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020},
+  }).outputText,inputModule);
+  const state = { inputRouter:new inputModule.exports.UIInputRouter(), homeOverlay:'none', phase:'ready', resultSelection:0 };
   for (const name of ['moveHomeSelection','activateHomeSelection',
     'closeHomeOverlay','moveSettingsSelection','activateSettingsSelection','tryPrimaryAction','togglePause',
     'selectPauseOption','activatePauseSelection','moveResultSelection','activateResultSelection','returnToHome',
     'moveLeaderboardSelection','changeLeaderboardPage','activateLeaderboardSelection']) {
     state[name] = (...args) => calls.push([name, ...args]);
   }
-  const press = key => { state.heldKeys.clear(); runtime.handleKeyDownCode.call(state, androidGameKey(key)); };
+  const press = key => { state.inputRouter.clear(); runtime.handleKeyDownCode.call(state, androidGameKey(key)); };
   press(20); press(23);
   state.homeOverlay='settings'; press(19); press(23);
   state.homeOverlay='leaderboard'; press(19); press(20); press(21); press(22); press(23); press(4);

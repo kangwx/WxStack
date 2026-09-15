@@ -1,0 +1,5 @@
+{
+  "__type__": "cc.Material", "_name": "ImpactRing", "_objFlags": 0, "_native": "",
+  "_effectAsset": { "__uuid__": "96f3ec4e-732b-49c8-9871-1c774bd09014", "__expectedType__": "cc.EffectAsset" },
+  "_techIdx": 0, "_defines": [{}], "_states": [{}], "_props": [{}]
+}

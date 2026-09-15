@@ -1,0 +1,15 @@
+{
+  "browser": "152.0.7977.83",
+  "date": "2026-09-14T11:21:02.955Z",
+  "errors": [],
+  "final": {
+    "phase": "ready",
+    "overlay": "none",
+    "score": 0,
+    "stamina": 4,
+    "transition": false,
+    "revive": false,
+    "nick": false
+  },
+  "dpr": 1
+}

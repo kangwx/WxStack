@@ -1,0 +1,2298 @@
+{
+  "startedAt": "2026-09-14T11:27:58.565Z",
+  "url": "http://127.0.0.1:7458/?profile",
+  "kind": "real-browser-lifecycle",
+  "build": "Cocos 3.8.8 web-mobile debug",
+  "androidVerified": false,
+  "launchArgs": [
+    "--enable-webgl",
+    "--ignore-gpu-blocklist",
+    "--autoplay-policy=no-user-gesture-required"
+  ],
+  "viewport": {
+    "width": 1920,
+    "height": 1080
+  },
+  "deviceScaleFactor": 1,
+  "errors": [
+    {
+      "kind": "console",
+      "message": "Failed to load resource: the server responded with a status of 404 (File not found)",
+      "location": {
+        "url": "http://127.0.0.1:7458/favicon.ico",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      }
+    },
+    {
+      "kind": "console",
+      "message": "Failed to load resource: the server responded with a status of 404 (File not found)",
+      "location": {
+        "url": "http://127.0.0.1:7458/favicon.ico",
+        "line": 0,
+        "column": 0,
+        "lineNumber": 0,
+        "columnNumber": 0
+      }
+    }
+  ],
+  "warnings": [],
+  "failedRequests": [],
+  "httpErrors": [],
+  "checks": [
+    {
+      "name": "settings route warmup",
+      "pass": true
+    },
+    {
+      "name": "nickname route warmup",
+      "pass": true
+    },
+    {
+      "name": "nickname return focus warmup",
+      "pass": true
+    },
+    {
+      "name": "settings return focus warmup",
+      "pass": true
+    },
+    {
+      "name": "leaderboard route warmup",
+      "pass": true
+    },
+    {
+      "name": "leaderboard return focus warmup",
+      "pass": true
+    },
+    {
+      "name": "restart returns home warmup",
+      "pass": true
+    },
+    {
+      "name": "settings route 1",
+      "pass": true
+    },
+    {
+      "name": "nickname route 1",
+      "pass": true
+    },
+    {
+      "name": "nickname return focus 1",
+      "pass": true
+    },
+    {
+      "name": "settings return focus 1",
+      "pass": true
+    },
+    {
+      "name": "leaderboard route 1",
+      "pass": true
+    },
+    {
+      "name": "leaderboard return focus 1",
+      "pass": true
+    },
+    {
+      "name": "settings route 2",
+      "pass": true
+    },
+    {
+      "name": "nickname route 2",
+      "pass": true
+    },
+    {
+      "name": "nickname return focus 2",
+      "pass": true
+    },
+    {
+      "name": "settings return focus 2",
+      "pass": true
+    },
+    {
+      "name": "leaderboard route 2",
+      "pass": true
+    },
+    {
+      "name": "leaderboard return focus 2",
+      "pass": true
+    },
+    {
+      "name": "settings route 3",
+      "pass": true
+    },
+    {
+      "name": "nickname route 3",
+      "pass": true
+    },
+    {
+      "name": "nickname return focus 3",
+      "pass": true
+    },
+    {
+      "name": "settings return focus 3",
+      "pass": true
+    },
+    {
+      "name": "leaderboard route 3",
+      "pass": true
+    },
+    {
+      "name": "leaderboard return focus 3",
+      "pass": true
+    },
+    {
+      "name": "settings route 4",
+      "pass": true
+    },
+    {
+      "name": "nickname route 4",
+      "pass": true
+    },
+    {
+      "name": "nickname return focus 4",
+      "pass": true
+    },
+    {
+      "name": "settings return focus 4",
+      "pass": true
+    },
+    {
+      "name": "leaderboard route 4",
+      "pass": true
+    },
+    {
+      "name": "leaderboard return focus 4",
+      "pass": true
+    },
+    {
+      "name": "settings route 5",
+      "pass": true
+    },
+    {
+      "name": "nickname route 5",
+      "pass": true
+    },
+    {
+      "name": "nickname return focus 5",
+      "pass": true
+    },
+    {
+      "name": "settings return focus 5",
+      "pass": true
+    },
+    {
+      "name": "leaderboard route 5",
+      "pass": true
+    },
+    {
+      "name": "leaderboard return focus 5",
+      "pass": true
+    },
+    {
+      "name": "settings route 6",
+      "pass": true
+    },
+    {
+      "name": "nickname route 6",
+      "pass": true
+    },
+    {
+      "name": "nickname return focus 6",
+      "pass": true
+    },
+    {
+      "name": "settings return focus 6",
+      "pass": true
+    },
+    {
+      "name": "leaderboard route 6",
+      "pass": true
+    },
+    {
+      "name": "leaderboard return focus 6",
+      "pass": true
+    },
+    {
+      "name": "settings route 7",
+      "pass": true
+    },
+    {
+      "name": "nickname route 7",
+      "pass": true
+    },
+    {
+      "name": "nickname return focus 7",
+      "pass": true
+    },
+    {
+      "name": "settings return focus 7",
+      "pass": true
+    },
+    {
+      "name": "leaderboard route 7",
+      "pass": true
+    },
+    {
+      "name": "leaderboard return focus 7",
+      "pass": true
+    },
+    {
+      "name": "settings route 8",
+      "pass": true
+    },
+    {
+      "name": "nickname route 8",
+      "pass": true
+    },
+    {
+      "name": "nickname return focus 8",
+      "pass": true
+    },
+    {
+      "name": "settings return focus 8",
+      "pass": true
+    },
+    {
+      "name": "leaderboard route 8",
+      "pass": true
+    },
+    {
+      "name": "leaderboard return focus 8",
+      "pass": true
+    },
+    {
+      "name": "settings route 9",
+      "pass": true
+    },
+    {
+      "name": "nickname route 9",
+      "pass": true
+    },
+    {
+      "name": "nickname return focus 9",
+      "pass": true
+    },
+    {
+      "name": "settings return focus 9",
+      "pass": true
+    },
+    {
+      "name": "leaderboard route 9",
+      "pass": true
+    },
+    {
+      "name": "leaderboard return focus 9",
+      "pass": true
+    },
+    {
+      "name": "settings route 10",
+      "pass": true
+    },
+    {
+      "name": "nickname route 10",
+      "pass": true
+    },
+    {
+      "name": "nickname return focus 10",
+      "pass": true
+    },
+    {
+      "name": "settings return focus 10",
+      "pass": true
+    },
+    {
+      "name": "leaderboard route 10",
+      "pass": true
+    },
+    {
+      "name": "leaderboard return focus 10",
+      "pass": true
+    },
+    {
+      "name": "settings route 11",
+      "pass": true
+    },
+    {
+      "name": "nickname route 11",
+      "pass": true
+    },
+    {
+      "name": "nickname return focus 11",
+      "pass": true
+    },
+    {
+      "name": "settings return focus 11",
+      "pass": true
+    },
+    {
+      "name": "leaderboard route 11",
+      "pass": true
+    },
+    {
+      "name": "leaderboard return focus 11",
+      "pass": true
+    },
+    {
+      "name": "settings route 12",
+      "pass": true
+    },
+    {
+      "name": "nickname route 12",
+      "pass": true
+    },
+    {
+      "name": "nickname return focus 12",
+      "pass": true
+    },
+    {
+      "name": "settings return focus 12",
+      "pass": true
+    },
+    {
+      "name": "leaderboard route 12",
+      "pass": true
+    },
+    {
+      "name": "leaderboard return focus 12",
+      "pass": true
+    },
+    {
+      "name": "settings route 13",
+      "pass": true
+    },
+    {
+      "name": "nickname route 13",
+      "pass": true
+    },
+    {
+      "name": "nickname return focus 13",
+      "pass": true
+    },
+    {
+      "name": "settings return focus 13",
+      "pass": true
+    },
+    {
+      "name": "leaderboard route 13",
+      "pass": true
+    },
+    {
+      "name": "leaderboard return focus 13",
+      "pass": true
+    },
+    {
+      "name": "settings route 14",
+      "pass": true
+    },
+    {
+      "name": "nickname route 14",
+      "pass": true
+    },
+    {
+      "name": "nickname return focus 14",
+      "pass": true
+    },
+    {
+      "name": "settings return focus 14",
+      "pass": true
+    },
+    {
+      "name": "leaderboard route 14",
+      "pass": true
+    },
+    {
+      "name": "leaderboard return focus 14",
+      "pass": true
+    },
+    {
+      "name": "settings route 15",
+      "pass": true
+    },
+    {
+      "name": "nickname route 15",
+      "pass": true
+    },
+    {
+      "name": "nickname return focus 15",
+      "pass": true
+    },
+    {
+      "name": "settings return focus 15",
+      "pass": true
+    },
+    {
+      "name": "leaderboard route 15",
+      "pass": true
+    },
+    {
+      "name": "leaderboard return focus 15",
+      "pass": true
+    },
+    {
+      "name": "settings route 16",
+      "pass": true
+    },
+    {
+      "name": "nickname route 16",
+      "pass": true
+    },
+    {
+      "name": "nickname return focus 16",
+      "pass": true
+    },
+    {
+      "name": "settings return focus 16",
+      "pass": true
+    },
+    {
+      "name": "leaderboard route 16",
+      "pass": true
+    },
+    {
+      "name": "leaderboard return focus 16",
+      "pass": true
+    },
+    {
+      "name": "settings route 17",
+      "pass": true
+    },
+    {
+      "name": "nickname route 17",
+      "pass": true
+    },
+    {
+      "name": "nickname return focus 17",
+      "pass": true
+    },
+    {
+      "name": "settings return focus 17",
+      "pass": true
+    },
+    {
+      "name": "leaderboard route 17",
+      "pass": true
+    },
+    {
+      "name": "leaderboard return focus 17",
+      "pass": true
+    },
+    {
+      "name": "settings route 18",
+      "pass": true
+    },
+    {
+      "name": "nickname route 18",
+      "pass": true
+    },
+    {
+      "name": "nickname return focus 18",
+      "pass": true
+    },
+    {
+      "name": "settings return focus 18",
+      "pass": true
+    },
+    {
+      "name": "leaderboard route 18",
+      "pass": true
+    },
+    {
+      "name": "leaderboard return focus 18",
+      "pass": true
+    },
+    {
+      "name": "settings route 19",
+      "pass": true
+    },
+    {
+      "name": "nickname route 19",
+      "pass": true
+    },
+    {
+      "name": "nickname return focus 19",
+      "pass": true
+    },
+    {
+      "name": "settings return focus 19",
+      "pass": true
+    },
+    {
+      "name": "leaderboard route 19",
+      "pass": true
+    },
+    {
+      "name": "leaderboard return focus 19",
+      "pass": true
+    },
+    {
+      "name": "settings route 20",
+      "pass": true
+    },
+    {
+      "name": "nickname route 20",
+      "pass": true
+    },
+    {
+      "name": "nickname return focus 20",
+      "pass": true
+    },
+    {
+      "name": "settings return focus 20",
+      "pass": true
+    },
+    {
+      "name": "leaderboard route 20",
+      "pass": true
+    },
+    {
+      "name": "leaderboard return focus 20",
+      "pass": true
+    },
+    {
+      "name": "settings route 21",
+      "pass": true
+    },
+    {
+      "name": "nickname route 21",
+      "pass": true
+    },
+    {
+      "name": "nickname return focus 21",
+      "pass": true
+    },
+    {
+      "name": "settings return focus 21",
+      "pass": true
+    },
+    {
+      "name": "leaderboard route 21",
+      "pass": true
+    },
+    {
+      "name": "leaderboard return focus 21",
+      "pass": true
+    },
+    {
+      "name": "settings route 22",
+      "pass": true
+    },
+    {
+      "name": "nickname route 22",
+      "pass": true
+    },
+    {
+      "name": "nickname return focus 22",
+      "pass": true
+    },
+    {
+      "name": "settings return focus 22",
+      "pass": true
+    },
+    {
+      "name": "leaderboard route 22",
+      "pass": true
+    },
+    {
+      "name": "leaderboard return focus 22",
+      "pass": true
+    },
+    {
+      "name": "settings route 23",
+      "pass": true
+    },
+    {
+      "name": "nickname route 23",
+      "pass": true
+    },
+    {
+      "name": "nickname return focus 23",
+      "pass": true
+    },
+    {
+      "name": "settings return focus 23",
+      "pass": true
+    },
+    {
+      "name": "leaderboard route 23",
+      "pass": true
+    },
+    {
+      "name": "leaderboard return focus 23",
+      "pass": true
+    },
+    {
+      "name": "settings route 24",
+      "pass": true
+    },
+    {
+      "name": "nickname route 24",
+      "pass": true
+    },
+    {
+      "name": "nickname return focus 24",
+      "pass": true
+    },
+    {
+      "name": "settings return focus 24",
+      "pass": true
+    },
+    {
+      "name": "leaderboard route 24",
+      "pass": true
+    },
+    {
+      "name": "leaderboard return focus 24",
+      "pass": true
+    },
+    {
+      "name": "settings route 25",
+      "pass": true
+    },
+    {
+      "name": "nickname route 25",
+      "pass": true
+    },
+    {
+      "name": "nickname return focus 25",
+      "pass": true
+    },
+    {
+      "name": "settings return focus 25",
+      "pass": true
+    },
+    {
+      "name": "leaderboard route 25",
+      "pass": true
+    },
+    {
+      "name": "leaderboard return focus 25",
+      "pass": true
+    },
+    {
+      "name": "settings route 26",
+      "pass": true
+    },
+    {
+      "name": "nickname route 26",
+      "pass": true
+    },
+    {
+      "name": "nickname return focus 26",
+      "pass": true
+    },
+    {
+      "name": "settings return focus 26",
+      "pass": true
+    },
+    {
+      "name": "leaderboard route 26",
+      "pass": true
+    },
+    {
+      "name": "leaderboard return focus 26",
+      "pass": true
+    },
+    {
+      "name": "settings route 27",
+      "pass": true
+    },
+    {
+      "name": "nickname route 27",
+      "pass": true
+    },
+    {
+      "name": "nickname return focus 27",
+      "pass": true
+    },
+    {
+      "name": "settings return focus 27",
+      "pass": true
+    },
+    {
+      "name": "leaderboard route 27",
+      "pass": true
+    },
+    {
+      "name": "leaderboard return focus 27",
+      "pass": true
+    },
+    {
+      "name": "settings route 28",
+      "pass": true
+    },
+    {
+      "name": "nickname route 28",
+      "pass": true
+    },
+    {
+      "name": "nickname return focus 28",
+      "pass": true
+    },
+    {
+      "name": "settings return focus 28",
+      "pass": true
+    },
+    {
+      "name": "leaderboard route 28",
+      "pass": true
+    },
+    {
+      "name": "leaderboard return focus 28",
+      "pass": true
+    },
+    {
+      "name": "settings route 29",
+      "pass": true
+    },
+    {
+      "name": "nickname route 29",
+      "pass": true
+    },
+    {
+      "name": "nickname return focus 29",
+      "pass": true
+    },
+    {
+      "name": "settings return focus 29",
+      "pass": true
+    },
+    {
+      "name": "leaderboard route 29",
+      "pass": true
+    },
+    {
+      "name": "leaderboard return focus 29",
+      "pass": true
+    },
+    {
+      "name": "settings route 30",
+      "pass": true
+    },
+    {
+      "name": "nickname route 30",
+      "pass": true
+    },
+    {
+      "name": "nickname return focus 30",
+      "pass": true
+    },
+    {
+      "name": "settings return focus 30",
+      "pass": true
+    },
+    {
+      "name": "leaderboard route 30",
+      "pass": true
+    },
+    {
+      "name": "leaderboard return focus 30",
+      "pass": true
+    },
+    {
+      "name": "settings route 31",
+      "pass": true
+    },
+    {
+      "name": "nickname route 31",
+      "pass": true
+    },
+    {
+      "name": "nickname return focus 31",
+      "pass": true
+    },
+    {
+      "name": "settings return focus 31",
+      "pass": true
+    },
+    {
+      "name": "leaderboard route 31",
+      "pass": true
+    },
+    {
+      "name": "leaderboard return focus 31",
+      "pass": true
+    },
+    {
+      "name": "settings route 32",
+      "pass": true
+    },
+    {
+      "name": "nickname route 32",
+      "pass": true
+    },
+    {
+      "name": "nickname return focus 32",
+      "pass": true
+    },
+    {
+      "name": "settings return focus 32",
+      "pass": true
+    },
+    {
+      "name": "leaderboard route 32",
+      "pass": true
+    },
+    {
+      "name": "leaderboard return focus 32",
+      "pass": true
+    },
+    {
+      "name": "settings route 33",
+      "pass": true
+    },
+    {
+      "name": "nickname route 33",
+      "pass": true
+    },
+    {
+      "name": "nickname return focus 33",
+      "pass": true
+    },
+    {
+      "name": "settings return focus 33",
+      "pass": true
+    },
+    {
+      "name": "leaderboard route 33",
+      "pass": true
+    },
+    {
+      "name": "leaderboard return focus 33",
+      "pass": true
+    },
+    {
+      "name": "settings route 34",
+      "pass": true
+    },
+    {
+      "name": "nickname route 34",
+      "pass": true
+    },
+    {
+      "name": "nickname return focus 34",
+      "pass": true
+    },
+    {
+      "name": "settings return focus 34",
+      "pass": true
+    },
+    {
+      "name": "leaderboard route 34",
+      "pass": true
+    },
+    {
+      "name": "leaderboard return focus 34",
+      "pass": true
+    },
+    {
+      "name": "settings route 35",
+      "pass": true
+    },
+    {
+      "name": "nickname route 35",
+      "pass": true
+    },
+    {
+      "name": "nickname return focus 35",
+      "pass": true
+    },
+    {
+      "name": "settings return focus 35",
+      "pass": true
+    },
+    {
+      "name": "leaderboard route 35",
+      "pass": true
+    },
+    {
+      "name": "leaderboard return focus 35",
+      "pass": true
+    },
+    {
+      "name": "settings route 36",
+      "pass": true
+    },
+    {
+      "name": "nickname route 36",
+      "pass": true
+    },
+    {
+      "name": "nickname return focus 36",
+      "pass": true
+    },
+    {
+      "name": "settings return focus 36",
+      "pass": true
+    },
+    {
+      "name": "leaderboard route 36",
+      "pass": true
+    },
+    {
+      "name": "leaderboard return focus 36",
+      "pass": true
+    },
+    {
+      "name": "settings route 37",
+      "pass": true
+    },
+    {
+      "name": "nickname route 37",
+      "pass": true
+    },
+    {
+      "name": "nickname return focus 37",
+      "pass": true
+    },
+    {
+      "name": "settings return focus 37",
+      "pass": true
+    },
+    {
+      "name": "leaderboard route 37",
+      "pass": true
+    },
+    {
+      "name": "leaderboard return focus 37",
+      "pass": true
+    },
+    {
+      "name": "settings route 38",
+      "pass": true
+    },
+    {
+      "name": "nickname route 38",
+      "pass": true
+    },
+    {
+      "name": "nickname return focus 38",
+      "pass": true
+    },
+    {
+      "name": "settings return focus 38",
+      "pass": true
+    },
+    {
+      "name": "leaderboard route 38",
+      "pass": true
+    },
+    {
+      "name": "leaderboard return focus 38",
+      "pass": true
+    },
+    {
+      "name": "settings route 39",
+      "pass": true
+    },
+    {
+      "name": "nickname route 39",
+      "pass": true
+    },
+    {
+      "name": "nickname return focus 39",
+      "pass": true
+    },
+    {
+      "name": "settings return focus 39",
+      "pass": true
+    },
+    {
+      "name": "leaderboard route 39",
+      "pass": true
+    },
+    {
+      "name": "leaderboard return focus 39",
+      "pass": true
+    },
+    {
+      "name": "settings route 40",
+      "pass": true
+    },
+    {
+      "name": "nickname route 40",
+      "pass": true
+    },
+    {
+      "name": "nickname return focus 40",
+      "pass": true
+    },
+    {
+      "name": "settings return focus 40",
+      "pass": true
+    },
+    {
+      "name": "leaderboard route 40",
+      "pass": true
+    },
+    {
+      "name": "leaderboard return focus 40",
+      "pass": true
+    },
+    {
+      "name": "settings route 41",
+      "pass": true
+    },
+    {
+      "name": "nickname route 41",
+      "pass": true
+    },
+    {
+      "name": "nickname return focus 41",
+      "pass": true
+    },
+    {
+      "name": "settings return focus 41",
+      "pass": true
+    },
+    {
+      "name": "leaderboard route 41",
+      "pass": true
+    },
+    {
+      "name": "leaderboard return focus 41",
+      "pass": true
+    },
+    {
+      "name": "settings route 42",
+      "pass": true
+    },
+    {
+      "name": "nickname route 42",
+      "pass": true
+    },
+    {
+      "name": "nickname return focus 42",
+      "pass": true
+    },
+    {
+      "name": "settings return focus 42",
+      "pass": true
+    },
+    {
+      "name": "leaderboard route 42",
+      "pass": true
+    },
+    {
+      "name": "leaderboard return focus 42",
+      "pass": true
+    },
+    {
+      "name": "settings route 43",
+      "pass": true
+    },
+    {
+      "name": "nickname route 43",
+      "pass": true
+    },
+    {
+      "name": "nickname return focus 43",
+      "pass": true
+    },
+    {
+      "name": "settings return focus 43",
+      "pass": true
+    },
+    {
+      "name": "leaderboard route 43",
+      "pass": true
+    },
+    {
+      "name": "leaderboard return focus 43",
+      "pass": true
+    },
+    {
+      "name": "settings route 44",
+      "pass": true
+    },
+    {
+      "name": "nickname route 44",
+      "pass": true
+    },
+    {
+      "name": "nickname return focus 44",
+      "pass": true
+    },
+    {
+      "name": "settings return focus 44",
+      "pass": true
+    },
+    {
+      "name": "leaderboard route 44",
+      "pass": true
+    },
+    {
+      "name": "leaderboard return focus 44",
+      "pass": true
+    },
+    {
+      "name": "settings route 45",
+      "pass": true
+    },
+    {
+      "name": "nickname route 45",
+      "pass": true
+    },
+    {
+      "name": "nickname return focus 45",
+      "pass": true
+    },
+    {
+      "name": "settings return focus 45",
+      "pass": true
+    },
+    {
+      "name": "leaderboard route 45",
+      "pass": true
+    },
+    {
+      "name": "leaderboard return focus 45",
+      "pass": true
+    },
+    {
+      "name": "settings route 46",
+      "pass": true
+    },
+    {
+      "name": "nickname route 46",
+      "pass": true
+    },
+    {
+      "name": "nickname return focus 46",
+      "pass": true
+    },
+    {
+      "name": "settings return focus 46",
+      "pass": true
+    },
+    {
+      "name": "leaderboard route 46",
+      "pass": true
+    },
+    {
+      "name": "leaderboard return focus 46",
+      "pass": true
+    },
+    {
+      "name": "settings route 47",
+      "pass": true
+    },
+    {
+      "name": "nickname route 47",
+      "pass": true
+    },
+    {
+      "name": "nickname return focus 47",
+      "pass": true
+    },
+    {
+      "name": "settings return focus 47",
+      "pass": true
+    },
+    {
+      "name": "leaderboard route 47",
+      "pass": true
+    },
+    {
+      "name": "leaderboard return focus 47",
+      "pass": true
+    },
+    {
+      "name": "settings route 48",
+      "pass": true
+    },
+    {
+      "name": "nickname route 48",
+      "pass": true
+    },
+    {
+      "name": "nickname return focus 48",
+      "pass": true
+    },
+    {
+      "name": "settings return focus 48",
+      "pass": true
+    },
+    {
+      "name": "leaderboard route 48",
+      "pass": true
+    },
+    {
+      "name": "leaderboard return focus 48",
+      "pass": true
+    },
+    {
+      "name": "settings route 49",
+      "pass": true
+    },
+    {
+      "name": "nickname route 49",
+      "pass": true
+    },
+    {
+      "name": "nickname return focus 49",
+      "pass": true
+    },
+    {
+      "name": "settings return focus 49",
+      "pass": true
+    },
+    {
+      "name": "leaderboard route 49",
+      "pass": true
+    },
+    {
+      "name": "leaderboard return focus 49",
+      "pass": true
+    },
+    {
+      "name": "settings route 50",
+      "pass": true
+    },
+    {
+      "name": "nickname route 50",
+      "pass": true
+    },
+    {
+      "name": "nickname return focus 50",
+      "pass": true
+    },
+    {
+      "name": "settings return focus 50",
+      "pass": true
+    },
+    {
+      "name": "leaderboard route 50",
+      "pass": true
+    },
+    {
+      "name": "leaderboard return focus 50",
+      "pass": true
+    },
+    {
+      "name": "restart returns home 1",
+      "pass": true
+    },
+    {
+      "name": "restart returns home 2",
+      "pass": true
+    },
+    {
+      "name": "restart returns home 3",
+      "pass": true
+    },
+    {
+      "name": "restart returns home 4",
+      "pass": true
+    },
+    {
+      "name": "restart returns home 5",
+      "pass": true
+    },
+    {
+      "name": "restart returns home 6",
+      "pass": true
+    },
+    {
+      "name": "restart returns home 7",
+      "pass": true
+    },
+    {
+      "name": "restart returns home 8",
+      "pass": true
+    },
+    {
+      "name": "restart returns home 9",
+      "pass": true
+    },
+    {
+      "name": "restart returns home 10",
+      "pass": true
+    },
+    {
+      "name": "restart returns home 11",
+      "pass": true
+    },
+    {
+      "name": "restart returns home 12",
+      "pass": true
+    },
+    {
+      "name": "restart returns home 13",
+      "pass": true
+    },
+    {
+      "name": "restart returns home 14",
+      "pass": true
+    },
+    {
+      "name": "restart returns home 15",
+      "pass": true
+    },
+    {
+      "name": "restart returns home 16",
+      "pass": true
+    },
+    {
+      "name": "restart returns home 17",
+      "pass": true
+    },
+    {
+      "name": "restart returns home 18",
+      "pass": true
+    },
+    {
+      "name": "restart returns home 19",
+      "pass": true
+    },
+    {
+      "name": "restart returns home 20",
+      "pass": true
+    },
+    {
+      "name": "restart returns home 21",
+      "pass": true
+    },
+    {
+      "name": "restart returns home 22",
+      "pass": true
+    },
+    {
+      "name": "restart returns home 23",
+      "pass": true
+    },
+    {
+      "name": "restart returns home 24",
+      "pass": true
+    },
+    {
+      "name": "restart returns home 25",
+      "pass": true
+    },
+    {
+      "name": "restart returns home 26",
+      "pass": true
+    },
+    {
+      "name": "restart returns home 27",
+      "pass": true
+    },
+    {
+      "name": "restart returns home 28",
+      "pass": true
+    },
+    {
+      "name": "restart returns home 29",
+      "pass": true
+    },
+    {
+      "name": "restart returns home 30",
+      "pass": true
+    },
+    {
+      "name": "restart returns home 31",
+      "pass": true
+    },
+    {
+      "name": "restart returns home 32",
+      "pass": true
+    },
+    {
+      "name": "restart returns home 33",
+      "pass": true
+    },
+    {
+      "name": "restart returns home 34",
+      "pass": true
+    },
+    {
+      "name": "restart returns home 35",
+      "pass": true
+    },
+    {
+      "name": "restart returns home 36",
+      "pass": true
+    },
+    {
+      "name": "restart returns home 37",
+      "pass": true
+    },
+    {
+      "name": "restart returns home 38",
+      "pass": true
+    },
+    {
+      "name": "restart returns home 39",
+      "pass": true
+    },
+    {
+      "name": "restart returns home 40",
+      "pass": true
+    },
+    {
+      "name": "restart returns home 41",
+      "pass": true
+    },
+    {
+      "name": "restart returns home 42",
+      "pass": true
+    },
+    {
+      "name": "restart returns home 43",
+      "pass": true
+    },
+    {
+      "name": "restart returns home 44",
+      "pass": true
+    },
+    {
+      "name": "restart returns home 45",
+      "pass": true
+    },
+    {
+      "name": "restart returns home 46",
+      "pass": true
+    },
+    {
+      "name": "restart returns home 47",
+      "pass": true
+    },
+    {
+      "name": "restart returns home 48",
+      "pass": true
+    },
+    {
+      "name": "restart returns home 49",
+      "pass": true
+    },
+    {
+      "name": "restart returns home 50",
+      "pass": true
+    },
+    {
+      "name": "navigation retains sceneNodes",
+      "pass": true
+    },
+    {
+      "name": "restart retains sceneNodes",
+      "pass": true
+    },
+    {
+      "name": "navigation retains sceneComponents",
+      "pass": true
+    },
+    {
+      "name": "restart retains sceneComponents",
+      "pass": true
+    },
+    {
+      "name": "navigation retains activeInputListeners",
+      "pass": true
+    },
+    {
+      "name": "restart retains activeInputListeners",
+      "pass": true
+    },
+    {
+      "name": "navigation retains activeGameListeners",
+      "pass": true
+    },
+    {
+      "name": "restart retains activeGameListeners",
+      "pass": true
+    },
+    {
+      "name": "navigation retains activeViewListeners",
+      "pass": true
+    },
+    {
+      "name": "restart retains activeViewListeners",
+      "pass": true
+    },
+    {
+      "name": "navigation retains scheduler",
+      "pass": true
+    },
+    {
+      "name": "restart retains scheduler",
+      "pass": true
+    },
+    {
+      "name": "test restarts preserve stamina",
+      "pass": true
+    },
+    {
+      "name": "resize transition unlocks",
+      "pass": true
+    },
+    {
+      "name": "disabled stops moving block",
+      "pass": true
+    },
+    {
+      "name": "disabled stops physics and owned input",
+      "pass": true
+    },
+    {
+      "name": "re-enable restores physics and listener count",
+      "pass": true
+    },
+    {
+      "name": "moving block resumes after enabling",
+      "pass": true
+    },
+    {
+      "name": "QR 1 has owned frame",
+      "pass": true
+    },
+    {
+      "name": "QR 1 polling reuses texture",
+      "pass": true
+    },
+    {
+      "name": "QR 1 close releases ownership",
+      "pass": true
+    },
+    {
+      "name": "QR 2 has owned frame",
+      "pass": true
+    },
+    {
+      "name": "QR 2 polling reuses texture",
+      "pass": true
+    },
+    {
+      "name": "QR 2 close releases ownership",
+      "pass": true
+    },
+    {
+      "name": "QR 3 has owned frame",
+      "pass": true
+    },
+    {
+      "name": "QR 3 polling reuses texture",
+      "pass": true
+    },
+    {
+      "name": "QR 3 close releases ownership",
+      "pass": true
+    },
+    {
+      "name": "late QR create cannot reopen closed modal",
+      "pass": true
+    }
+  ],
+  "samples": [
+    {
+      "label": "before-50-navigation-and-50-restarts",
+      "capturedAt": "2026-09-14T11:28:04.345Z",
+      "gc": [
+        "completed",
+        "completed"
+      ],
+      "heap": {
+        "usedSize": 21865716,
+        "totalSize": 23101440,
+        "embedderHeapUsedSize": 3900384,
+        "backingStorageSize": 5788647
+      },
+      "dom": {
+        "documents": 1,
+        "nodes": 125,
+        "jsEventListeners": 59
+      },
+      "state": {
+        "phase": "ready",
+        "overlay": "none",
+        "routerTop": "home",
+        "routerDepth": 0,
+        "homeFocus": 0,
+        "settingsFocus": 3,
+        "resultFocus": 0,
+        "transition": false,
+        "transitionLocked": false,
+        "blocker": false,
+        "enabled": true,
+        "uiSuspended": false,
+        "physicsEnabled": true,
+        "sceneNodes": 1186,
+        "sceneComponents": 2422,
+        "activeSceneNodes": 105,
+        "world": {
+          "activeBlocks": 5,
+          "looseCount": 0,
+          "fragmentPoolCapacity": 32,
+          "fragmentPoolAvailable": 32,
+          "growthCount": 0,
+          "isInstancingEnabled": true
+        },
+        "blockPoolAvailable": 0,
+        "activeInputListeners": {
+          "keydown": 1,
+          "keyup": 1,
+          "gamepad-input": 1
+        },
+        "activeGameListeners": {
+          "game_on_hide": 1
+        },
+        "activeViewListeners": {
+          "design-resolution-changed": 1,
+          "canvas-resize": 1
+        },
+        "scheduler": {
+          "entries": 1,
+          "timers": 1
+        },
+        "revive": {
+          "visible": false,
+          "state": "closed",
+          "scheduled": false,
+          "polling": false,
+          "frameId": null,
+          "textureId": null,
+          "imageFrameId": null,
+          "frameUUID": null,
+          "textureUUID": null
+        },
+        "fx": {
+          "active": 0,
+          "rings": 8,
+          "growth": 0
+        },
+        "stamina": 5,
+        "testMode": true
+      }
+    },
+    {
+      "label": "after-50-navigation-cycles",
+      "capturedAt": "2026-09-14T11:29:13.368Z",
+      "gc": [
+        "completed",
+        "completed"
+      ],
+      "heap": {
+        "usedSize": 24095908,
+        "totalSize": 24936448,
+        "embedderHeapUsedSize": 3829264,
+        "backingStorageSize": 5788661
+      },
+      "dom": {
+        "documents": 1,
+        "nodes": 125,
+        "jsEventListeners": 59
+      },
+      "state": {
+        "phase": "ready",
+        "overlay": "none",
+        "routerTop": "home",
+        "routerDepth": 0,
+        "homeFocus": 1,
+        "settingsFocus": 3,
+        "resultFocus": 0,
+        "transition": false,
+        "transitionLocked": false,
+        "blocker": false,
+        "enabled": true,
+        "uiSuspended": false,
+        "physicsEnabled": true,
+        "sceneNodes": 1186,
+        "sceneComponents": 2422,
+        "activeSceneNodes": 105,
+        "world": {
+          "activeBlocks": 5,
+          "looseCount": 0,
+          "fragmentPoolCapacity": 32,
+          "fragmentPoolAvailable": 32,
+          "growthCount": 0,
+          "isInstancingEnabled": true
+        },
+        "blockPoolAvailable": 0,
+        "activeInputListeners": {
+          "keydown": 1,
+          "keyup": 1,
+          "gamepad-input": 1
+        },
+        "activeGameListeners": {
+          "game_on_hide": 1
+        },
+        "activeViewListeners": {
+          "design-resolution-changed": 1,
+          "canvas-resize": 1
+        },
+        "scheduler": {
+          "entries": 1,
+          "timers": 1
+        },
+        "revive": {
+          "visible": false,
+          "state": "closed",
+          "scheduled": false,
+          "polling": false,
+          "frameId": null,
+          "textureId": null,
+          "imageFrameId": null,
+          "frameUUID": null,
+          "textureUUID": null
+        },
+        "fx": {
+          "active": 0,
+          "rings": 8,
+          "growth": 0
+        },
+        "stamina": 5,
+        "testMode": true
+      }
+    },
+    {
+      "label": "after-50-navigation-and-50-restarts",
+      "capturedAt": "2026-09-14T11:29:54.020Z",
+      "gc": [
+        "completed",
+        "completed"
+      ],
+      "heap": {
+        "usedSize": 24332704,
+        "totalSize": 25198592,
+        "embedderHeapUsedSize": 3830696,
+        "backingStorageSize": 5788661
+      },
+      "dom": {
+        "documents": 1,
+        "nodes": 125,
+        "jsEventListeners": 59
+      },
+      "state": {
+        "phase": "ready",
+        "overlay": "none",
+        "routerTop": "home",
+        "routerDepth": 0,
+        "homeFocus": 0,
+        "settingsFocus": 3,
+        "resultFocus": 0,
+        "transition": false,
+        "transitionLocked": false,
+        "blocker": false,
+        "enabled": true,
+        "uiSuspended": false,
+        "physicsEnabled": true,
+        "sceneNodes": 1186,
+        "sceneComponents": 2422,
+        "activeSceneNodes": 105,
+        "world": {
+          "activeBlocks": 5,
+          "looseCount": 0,
+          "fragmentPoolCapacity": 32,
+          "fragmentPoolAvailable": 32,
+          "growthCount": 0,
+          "isInstancingEnabled": true
+        },
+        "blockPoolAvailable": 0,
+        "activeInputListeners": {
+          "keydown": 1,
+          "keyup": 1,
+          "gamepad-input": 1
+        },
+        "activeGameListeners": {
+          "game_on_hide": 1
+        },
+        "activeViewListeners": {
+          "design-resolution-changed": 1,
+          "canvas-resize": 1
+        },
+        "scheduler": {
+          "entries": 1,
+          "timers": 1
+        },
+        "revive": {
+          "visible": false,
+          "state": "closed",
+          "scheduled": false,
+          "polling": false,
+          "frameId": null,
+          "textureId": null,
+          "imageFrameId": null,
+          "frameUUID": null,
+          "textureUUID": null
+        },
+        "fx": {
+          "active": 0,
+          "rings": 8,
+          "growth": 0
+        },
+        "stamina": 5,
+        "testMode": true
+      }
+    },
+    {
+      "label": "final-after-resize-disable-and-qr",
+      "capturedAt": "2026-09-14T11:30:04.445Z",
+      "gc": [
+        "completed",
+        "completed"
+      ],
+      "heap": {
+        "usedSize": 24261808,
+        "totalSize": 25722880,
+        "embedderHeapUsedSize": 4361432,
+        "backingStorageSize": 5788795
+      },
+      "dom": {
+        "documents": 1,
+        "nodes": 142,
+        "jsEventListeners": 59
+      },
+      "state": {
+        "phase": "ready",
+        "overlay": "none",
+        "routerTop": "home",
+        "routerDepth": 0,
+        "homeFocus": 0,
+        "settingsFocus": 0,
+        "resultFocus": 0,
+        "transition": false,
+        "transitionLocked": false,
+        "blocker": false,
+        "enabled": true,
+        "uiSuspended": false,
+        "physicsEnabled": true,
+        "sceneNodes": 1186,
+        "sceneComponents": 2422,
+        "activeSceneNodes": 108,
+        "world": {
+          "activeBlocks": 5,
+          "looseCount": 0,
+          "fragmentPoolCapacity": 32,
+          "fragmentPoolAvailable": 32,
+          "growthCount": 0,
+          "isInstancingEnabled": true
+        },
+        "blockPoolAvailable": 0,
+        "activeInputListeners": {
+          "keydown": 1,
+          "keyup": 1,
+          "gamepad-input": 1
+        },
+        "activeGameListeners": {
+          "game_on_hide": 1
+        },
+        "activeViewListeners": {
+          "design-resolution-changed": 1,
+          "canvas-resize": 1
+        },
+        "scheduler": {
+          "entries": 1,
+          "timers": 1
+        },
+        "revive": {
+          "visible": false,
+          "state": "closed",
+          "scheduled": false,
+          "polling": false,
+          "frameId": null,
+          "textureId": null,
+          "imageFrameId": null,
+          "frameUUID": null,
+          "textureUUID": null
+        },
+        "fx": {
+          "active": 0,
+          "rings": 8,
+          "growth": 0
+        },
+        "stamina": 4,
+        "testMode": false
+      }
+    }
+  ],
+  "qrSessions": [
+    {
+      "open": {
+        "visible": true,
+        "state": "waiting",
+        "scheduled": true,
+        "polling": false,
+        "frameId": 1,
+        "textureId": 2,
+        "imageFrameId": 1,
+        "frameUUID": "",
+        "textureUUID": ""
+      },
+      "polled": {
+        "visible": true,
+        "state": "waiting",
+        "scheduled": true,
+        "polling": false,
+        "frameId": 1,
+        "textureId": 2,
+        "imageFrameId": 1,
+        "frameUUID": "",
+        "textureUUID": ""
+      },
+      "closed": {
+        "visible": false,
+        "state": "closed",
+        "scheduled": false,
+        "polling": false,
+        "frameId": null,
+        "textureId": null,
+        "imageFrameId": null,
+        "frameUUID": null,
+        "textureUUID": null
+      }
+    },
+    {
+      "open": {
+        "visible": true,
+        "state": "waiting",
+        "scheduled": true,
+        "polling": false,
+        "frameId": 3,
+        "textureId": 4,
+        "imageFrameId": 3,
+        "frameUUID": "",
+        "textureUUID": ""
+      },
+      "polled": {
+        "visible": true,
+        "state": "waiting",
+        "scheduled": true,
+        "polling": false,
+        "frameId": 3,
+        "textureId": 4,
+        "imageFrameId": 3,
+        "frameUUID": "",
+        "textureUUID": ""
+      },
+      "closed": {
+        "visible": false,
+        "state": "closed",
+        "scheduled": false,
+        "polling": false,
+        "frameId": null,
+        "textureId": null,
+        "imageFrameId": null,
+        "frameUUID": null,
+        "textureUUID": null
+      }
+    },
+    {
+      "open": {
+        "visible": true,
+        "state": "waiting",
+        "scheduled": true,
+        "polling": false,
+        "frameId": 5,
+        "textureId": 6,
+        "imageFrameId": 5,
+        "frameUUID": "",
+        "textureUUID": ""
+      },
+      "polled": {
+        "visible": true,
+        "state": "waiting",
+        "scheduled": true,
+        "polling": false,
+        "frameId": 5,
+        "textureId": 6,
+        "imageFrameId": 5,
+        "frameUUID": "",
+        "textureUUID": ""
+      },
+      "closed": {
+        "visible": false,
+        "state": "closed",
+        "scheduled": false,
+        "polling": false,
+        "frameId": null,
+        "textureId": null,
+        "imageFrameId": null,
+        "frameUUID": null,
+        "textureUUID": null
+      }
+    }
+  ],
+  "browser": "152.0.7977.83",
+  "environment": {
+    "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/152.0.0.0 Safari/537.36",
+    "dpr": 1,
+    "framebuffer": {
+      "width": 1920,
+      "height": 1080
+    },
+    "renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M1 Pro, Unspecified Version)"
+  },
+  "heapDeltaBytes": 2466988,
+  "heapDeltaPercent": 11.282447828372051,
+  "resize": {
+    "phase": "ready",
+    "overlay": "none",
+    "routerTop": "home",
+    "routerDepth": 0,
+    "homeFocus": 2,
+    "settingsFocus": 0,
+    "resultFocus": 0,
+    "transition": false,
+    "transitionLocked": false,
+    "blocker": false,
+    "enabled": true,
+    "uiSuspended": false,
+    "physicsEnabled": true,
+    "sceneNodes": 1186,
+    "sceneComponents": 2422,
+    "activeSceneNodes": 105,
+    "world": {
+      "activeBlocks": 5,
+      "looseCount": 0,
+      "fragmentPoolCapacity": 32,
+      "fragmentPoolAvailable": 32,
+      "growthCount": 0,
+      "isInstancingEnabled": true
+    },
+    "blockPoolAvailable": 0,
+    "activeInputListeners": {
+      "keydown": 1,
+      "keyup": 1,
+      "gamepad-input": 1
+    },
+    "activeGameListeners": {
+      "game_on_hide": 1
+    },
+    "activeViewListeners": {
+      "design-resolution-changed": 1,
+      "canvas-resize": 1
+    },
+    "scheduler": {
+      "entries": 1,
+      "timers": 1
+    },
+    "revive": {
+      "visible": false,
+      "state": "closed",
+      "scheduled": false,
+      "polling": false,
+      "frameId": null,
+      "textureId": null,
+      "imageFrameId": null,
+      "frameUUID": null,
+      "textureUUID": null
+    },
+    "fx": {
+      "active": 0,
+      "rings": 8,
+      "growth": 0
+    },
+    "stamina": 5,
+    "testMode": true
+  },
+  "disableEnable": {
+    "disabledStart": {
+      "x": -5.529999999999999,
+      "z": 0
+    },
+    "disabledEnd": {
+      "x": -5.529999999999999,
+      "z": 0
+    },
+    "resumedPosition": {
+      "x": -4.009239999995751,
+      "z": 0
+    },
+    "disabled": {
+      "phase": "playing",
+      "overlay": "none",
+      "routerTop": "gameplay",
+      "routerDepth": 0,
+      "homeFocus": 2,
+      "settingsFocus": 0,
+      "resultFocus": 0,
+      "transition": false,
+      "transitionLocked": false,
+      "blocker": false,
+      "enabled": false,
+      "uiSuspended": true,
+      "physicsEnabled": false,
+      "sceneNodes": 1186,
+      "sceneComponents": 2422,
+      "activeSceneNodes": 64,
+      "world": {
+        "activeBlocks": 2,
+        "looseCount": 0,
+        "fragmentPoolCapacity": 32,
+        "fragmentPoolAvailable": 32,
+        "growthCount": 0,
+        "isInstancingEnabled": true
+      },
+      "blockPoolAvailable": 3,
+      "activeInputListeners": {},
+      "activeGameListeners": {},
+      "activeViewListeners": {},
+      "scheduler": {
+        "entries": 0,
+        "timers": 0
+      },
+      "revive": {
+        "visible": false,
+        "state": "closed",
+        "scheduled": false,
+        "polling": false,
+        "frameId": null,
+        "textureId": null,
+        "imageFrameId": null,
+        "frameUUID": null,
+        "textureUUID": null
+      },
+      "fx": {
+        "active": 0,
+        "rings": 8,
+        "growth": 0
+      },
+      "stamina": 5,
+      "testMode": true
+    },
+    "enabled": {
+      "phase": "playing",
+      "overlay": "none",
+      "routerTop": "gameplay",
+      "routerDepth": 0,
+      "homeFocus": 2,
+      "settingsFocus": 0,
+      "resultFocus": 0,
+      "transition": false,
+      "transitionLocked": false,
+      "blocker": false,
+      "enabled": true,
+      "uiSuspended": false,
+      "physicsEnabled": true,
+      "sceneNodes": 1186,
+      "sceneComponents": 2422,
+      "activeSceneNodes": 64,
+      "world": {
+        "activeBlocks": 2,
+        "looseCount": 0,
+        "fragmentPoolCapacity": 32,
+        "fragmentPoolAvailable": 32,
+        "growthCount": 0,
+        "isInstancingEnabled": true
+      },
+      "blockPoolAvailable": 3,
+      "activeInputListeners": {
+        "keydown": 1,
+        "keyup": 1,
+        "gamepad-input": 1
+      },
+      "activeGameListeners": {
+        "game_on_hide": 1
+      },
+      "activeViewListeners": {
+        "design-resolution-changed": 1,
+        "canvas-resize": 1
+      },
+      "scheduler": {
+        "entries": 1,
+        "timers": 1
+      },
+      "revive": {
+        "visible": false,
+        "state": "closed",
+        "scheduled": false,
+        "polling": false,
+        "frameId": null,
+        "textureId": null,
+        "imageFrameId": null,
+        "frameUUID": null,
+        "textureUUID": null
+      },
+      "fx": {
+        "active": 0,
+        "rings": 8,
+        "growth": 0
+      },
+      "stamina": 5,
+      "testMode": true
+    }
+  },
+  "final": {
+    "label": "final-after-resize-disable-and-qr",
+    "capturedAt": "2026-09-14T11:30:04.445Z",
+    "gc": [
+      "completed",
+      "completed"
+    ],
+    "heap": {
+      "usedSize": 24261808,
+      "totalSize": 25722880,
+      "embedderHeapUsedSize": 4361432,
+      "backingStorageSize": 5788795
+    },
+    "dom": {
+      "documents": 1,
+      "nodes": 142,
+      "jsEventListeners": 59
+    },
+    "state": {
+      "phase": "ready",
+      "overlay": "none",
+      "routerTop": "home",
+      "routerDepth": 0,
+      "homeFocus": 0,
+      "settingsFocus": 0,
+      "resultFocus": 0,
+      "transition": false,
+      "transitionLocked": false,
+      "blocker": false,
+      "enabled": true,
+      "uiSuspended": false,
+      "physicsEnabled": true,
+      "sceneNodes": 1186,
+      "sceneComponents": 2422,
+      "activeSceneNodes": 108,
+      "world": {
+        "activeBlocks": 5,
+        "looseCount": 0,
+        "fragmentPoolCapacity": 32,
+        "fragmentPoolAvailable": 32,
+        "growthCount": 0,
+        "isInstancingEnabled": true
+      },
+      "blockPoolAvailable": 0,
+      "activeInputListeners": {
+        "keydown": 1,
+        "keyup": 1,
+        "gamepad-input": 1
+      },
+      "activeGameListeners": {
+        "game_on_hide": 1
+      },
+      "activeViewListeners": {
+        "design-resolution-changed": 1,
+        "canvas-resize": 1
+      },
+      "scheduler": {
+        "entries": 1,
+        "timers": 1
+      },
+      "revive": {
+        "visible": false,
+        "state": "closed",
+        "scheduled": false,
+        "polling": false,
+        "frameId": null,
+        "textureId": null,
+        "imageFrameId": null,
+        "frameUUID": null,
+        "textureUUID": null
+      },
+      "fx": {
+        "active": 0,
+        "rings": 8,
+        "growth": 0
+      },
+      "stamina": 4,
+      "testMode": false
+    }
+  },
+  "completed": false,
+  "failure": "AssertionError [ERR_ASSERTION]: browser exceptions and console errors\n\n2 !== 0\n\n    at main (/Users/wxkang/workspace/WxStack/tools/browser-lifecycle.cjs:188:10)\n    at async /Users/wxkang/workspace/WxStack/tools/browser-lifecycle.cjs:192:9",
+  "finishedAt": "2026-09-14T11:30:04.448Z"
+}

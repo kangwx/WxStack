@@ -31,7 +31,7 @@ class Node {
   }
   getComponent(Type) { return this.components.get(Type); }
   getChildByName(name) { return this.children.find(child => child.name === name); }
-  setPosition(x, y, z) { this.position = { x, y, z }; }
+  setPosition(x, y, z) { this.position = typeof x === 'object' ? { x:x.x, y:x.y, z:x.z } : { x, y, z }; }
   setScale(x, y, z) { this.scale = { x, y, z }; }
   on(name, callback, target) { this.events.set(name, { callback, target }); }
   off(name, callback, target) {
@@ -94,9 +94,7 @@ const cc = {
   Node, UITransform, Button, EditBox, Label, Color, ScrollView,
   MaskComponent: class { static Type = { GRAPHICS_RECT: 0 }; },
   Vec2: class { constructor(x, y) { Object.assign(this, { x, y }); } },
-  BlockInputEvents: class {}, Graphics: class {
-    constructor() { Object.assign(this, recordingGraphics()); }
-  }, Widget: class {},
+  BlockInputEvents: class {}, Widget: class {},
   UIOpacity: class { opacity = 255; },
   Vec3: class { constructor(x, y, z) { Object.assign(this, { x, y, z }); } },
   Tween: { stopAllByTarget() {} },
@@ -124,19 +122,21 @@ function loadPlainModule(name) {
 const loadLayoutModule = () => loadPlainModule('ProjectorLayout');
 const leaderboardData = loadPlainModule('Leaderboard');
 const { CREAM_STYLE } = loadPlainModule('CreamStyle');
-const sandbox = { exports: {}, require: id => id === 'cc' ? cc
+const uiFixture = require('./cocos-ui-fixture.cjs').createUIFixture(cc);
+const sandbox = { exports: {}, require: id => id === 'cc' ? cc : id === 'cc/env' ? { DEBUG:false }
   : id === './ProjectorLayout' ? loadLayoutModule()
   : id === './Leaderboard' ? leaderboardData
   : id === './ReviveClient' ? loadPlainModule('ReviveClient')
   : id === './Stamina' ? loadPlainModule('Stamina')
-  : id === './CreamStyle' ? { CREAM_STYLE } : {} };
+  : id === './CreamStyle' ? { CREAM_STYLE } : id === './StackWorld3D' ? {} : uiFixture.load(id.replace(/^\.\//, '')) };
 vm.runInNewContext(compiled, sandbox);
 const GamePrototype = sandbox.exports.StackGame.prototype;
 
 function gameFor(width, height) {
-  const game = Object.create(GamePrototype);
+  const game = new sandbox.exports.StackGame();
   game.visibleHeight = 1334;
   game.visibleWidth = width / height * game.visibleHeight;
+  uiFixture.attachGame(game);
   return game;
 }
 
@@ -278,36 +278,26 @@ test('home layout uses the same design-space geometry across 720p, 1080p, and 4K
   assert.equal(JSON.stringify(gameFor(3840, 2160).homeLayout()), reference);
 });
 
-test('the home start control uses the same real Button factory as the other menu controls', () => {
-  const calls = descendants(syntax, node => ts.isCallExpression(node)
-    && ts.isPropertyAccessExpression(node.expression)
-    && node.expression.name.text === 'makeMenuButton'
-    && ts.isStringLiteral(node.arguments[1])
-    && node.arguments[1].text === 'StartButton');
-  assert.equal(calls.length, 1, 'one real start button is constructed');
-  const parent = calls[0].arguments[0];
-  assert.ok(ts.isPropertyAccessExpression(parent) && parent.name.text === 'startGroup', 'start belongs to the animating home group');
-  const game = gameFor(1920, 1080);
-  const group = new Node('StartScreen');
-  const result = game.makeMenuButton(group, 'StartButton', '开始游戏', 620, 116);
-  assert.ok(result.node.getComponent(Button) instanceof Button);
-  assert.equal(result.node.parent, group);
-  assert.equal(result.label.node.parent, result.node, 'caption animates with its button');
-  assert.ok(result.node.getComponent(UITransform).height >= 88);
+test('the authored home controls retain real Buttons, shared visual layers and grouped captions', () => {
+  const game = makeHomeFixture(1920,1080);
+  for (const node of [game.startButton,game.settingsButton,game.leaderboardButton]) {
+    assert.ok(node.getComponent(Button) instanceof Button);
+    assert.equal(node.parent,game.startGroup);
+    assert.ok(node.getComponent(uiFixture.StackUIVisual));
+    assert.ok(node.getComponent(UITransform).height>=88);
+  }
+  assert.equal(game.startPromptLabel.node.parent,game.startButton);
+  assert.doesNotMatch(source,/makeMenuButton\(|new Graphics|addComponent\(Graphics\)/);
 });
 
 test('the developer test toggle belongs to settings and is absent from the home hierarchy', () => {
-  const game = gameFor(1920, 1080);
-  game.startGroup = new Node('StartScreen');
-  game.settingsGroup = new Node('SettingsScreen');
-  game.updateTestModeUI = () => {};
-  game.buildTestModeToggle();
-  assert.equal(game.testModeToggle.parent, game.settingsGroup);
+  const game = makeHomeFixture(1920,1080);
+  assert.equal(game.testModeToggle.parent,game.settingsGroup);
   assert.ok(game.testModeToggle.getComponent(Button) instanceof Button);
-  assert.equal(game.startGroup.children.length, 0);
+  assert.equal(uiFixture.find(game.startGroup,game.testModeToggle.name),null);
 });
 
-test('settings remote navigation visits sound, reduced motion, test mode, nickname, restore stamina, then return and wraps both ways', () => {
+test('settings remote navigation visits sound, reduced motion, test mode, nickname, restore stamina, appearance, then return and wraps both ways', () => {
   const game = gameFor(1920, 1080);
   const activated = [];
   const focused = [];
@@ -318,54 +308,31 @@ test('settings remote navigation visits sound, reduced motion, test mode, nickna
     toggleTestMode: () => activated.push('test'),
     openNicknameEditor: () => activated.push('nickname'),
     onRestoreStamina: () => activated.push('restore'),
+    onAppearanceToggle: () => activated.push('appearance'),
     closeHomeOverlay: () => activated.push('return'),
     updateSettingsUI() { focused.push(this.settingsSelection); },
   });
-  for (let index = 0; index < 6; index += 1) {
+  for (let index = 0; index < 7; index += 1) {
     game.activateSettingsSelection();
     game.moveSettingsSelection(1);
   }
-  assert.deepEqual(activated, ['sound', 'motion', 'test', 'nickname', 'restore', 'return']);
-  assert.deepEqual(focused, [1, 2, 3, 4, 5, 0]);
+  assert.deepEqual(activated, ['sound', 'motion', 'test', 'nickname', 'restore', 'appearance', 'return']);
+  assert.deepEqual(focused, [1, 2, 3, 4, 5, 6, 0]);
   activated.length = 0;
   focused.length = 0;
-  for (let index = 0; index < 6; index += 1) {
+  for (let index = 0; index < 7; index += 1) {
     game.moveSettingsSelection(-1);
     game.activateSettingsSelection();
   }
-  assert.deepEqual(activated, ['return', 'restore', 'nickname', 'test', 'motion', 'sound']);
-  assert.deepEqual(focused, [5, 4, 3, 2, 1, 0]);
+  assert.deepEqual(activated, ['return', 'appearance', 'restore', 'nickname', 'test', 'motion', 'sound']);
+  assert.deepEqual(focused, [6, 5, 4, 3, 2, 1, 0]);
 });
 
 function makeHomeFixture(width, height) {
   const game = gameFor(width, height);
-  game.startGroup = new Node('StartScreen');
-  game.homeOverlay = 'none';
-  game.phase = 'ready';
-  game.homeLeaderboardPreviewRows = [];
-  game.homeLeaderboardPreviewDetails = [];
-  game.homeLeaderboardPreviewEntries = [];
-  game.homeLeaderboardPreviewRequest = 0;
+  Object.assign(game, { homeOverlay: 'none', phase: 'ready', homeLeaderboardPreviewEntries: [],
+    homeLeaderboardPreviewRequest: 0, reducedMotion: false });
   game.setCenteredNodeLayout = (node, x, y) => node.setPosition(x, y, 0);
-  for (const name of ['Title', 'Subtitle', 'Eyebrow']) {
-    game.makeLabel(name, game.startGroup, name, 30, new Color(), 100, 50);
-  }
-  const start = game.makeMenuButton(game.startGroup, 'StartButton', '开始游戏', 620, 116);
-  game.startButton = start.node;
-  game.startButtonGraphics = start.graphics;
-  game.startPromptLabel = start.label;
-  for (const key of ['leaderboard', 'settings']) {
-    const button = game.makeMenuButton(game.startGroup, `${key}Button`, key, 620, 116);
-    game[`${key}Button`] = button.node;
-    game[`${key}ButtonGraphics`] = button.graphics;
-    game[`${key}ButtonLabel`] = button.label;
-  }
-  game.homeBestBadge = game.makeNode('HomeBestBadge', game.startGroup);
-  game.homeBestBadge.addComponent(UITransform);
-  for (const key of ['homeBestCaption', 'homeBestLabel', 'homeCoinCaption', 'homeCoinLabel', 'homeStaminaLabel', 'controlsLabel', 'precisionTipLabel']) {
-    game[key] = game.makeLabel(key, game.startGroup, key, 30, new Color(), 100, 50);
-  }
-  game.buildHomeLeaderboardPreview();
   return game;
 }
 
@@ -449,8 +416,10 @@ test('the right home preview is a real button whose click handler is attached an
     game[name] = { node: new Node(name) };
   }
   game.nicknameEditor = new Node('NicknameInput').addComponent(EditBox);
+  const physicsStates = [];
   Object.assign(game, {
-    graphics: { node: new Node('Graphics') },
+    graphics: new Node('InputSurface'),
+    world3D: { setPaused(paused) { physicsStates.push(paused); } },
     leaderboardButtons: [], leaderboardHandlers: [], leaderboardRequest: 0,
     heldKeys: new Set(), homeTransition: null,
   });
@@ -471,6 +440,7 @@ test('the right home preview is a real button whose click handler is attached an
   assert.equal(game.homeSelection, 1);
   const request = game.homeLeaderboardPreviewRequest;
   game.onDisable();
+  assert.deepEqual(physicsStates, [false, true], 'component lifecycle resumes and suspends its independent world');
   game.homeLeaderboardPreview.emit(Button.EventType.CLICK);
   assert.deepEqual(opened, ['leaderboard'], 'disabled screens must not retain clickable handlers');
   assert.ok(game.homeLeaderboardPreviewRequest > request, 'disable invalidates pending preview responses');
@@ -565,7 +535,7 @@ test('home preview uses separate medal, nickname, title and score fields with a 
     assert.equal(game.homeLeaderboardPreviewRows[i].overflow, Label.Overflow.SHRINK);
     assert.equal(game.homeLeaderboardPreviewDetails[i].overflow, Label.Overflow.SHRINK);
   }
-  assert.ok(game.homeLeaderboardPreviewGraphics.rectangles.filter(shape => shape.circle).length > 6);
+  assert.ok(game.ui.homePreviewRowVisuals.every(visual => visual.avatar.node.active && visual.badge.node.active));
   game.homeLeaderboardPreviewEntries = [];
   game.updateHomeLeaderboardPreviewUI();
   assert.equal(game.homeLeaderboardPreviewEmpty.node.active, true);
@@ -657,182 +627,88 @@ function contrast(foreground, background) {
   return (Math.max(first, second) + 0.05) / (Math.min(first, second) + 0.05);
 }
 
-function recordingGraphics() {
-  return {
-    node: new Node('Button'), fills: [], strokes: [], rectangles: [],
-    clear() { this.fills = []; this.strokes = []; this.rectangles = []; },
-    roundRect(x, y, width, height, radius) { this.rectangles.push({ x, y, width, height, radius }); },
-    rect(x, y, width, height) { this.rectangles.push({ x, y, width, height }); },
-    circle(x, y, radius) { this.rectangles.push({ x, y, radius, circle: true }); },
-    moveTo() {}, lineTo() {}, close() {},
-    fill() { this.fills.push(this.fillColor); },
-    stroke() { this.strokes.push({ color: this.strokeColor, width: this.lineWidth }); },
-  };
+function authoredVisual() { return uiFixture.button(new Node('FixturePanel')).graphics; }
+function visualRect(sprite) {
+  const transform = sprite.node.getComponent(UITransform);
+  return { x:sprite.node.position.x-transform.width/2, y:sprite.node.position.y-transform.height/2, width:transform.width, height:transform.height };
+}
+function makeLabel(name, parent, text, size, color, width, height) {
+  const node = new Node(name); node.parent = parent; node.addComponent(UITransform).setContentSize(width,height);
+  const label = node.addComponent(Label); Object.assign(label,{string:text,fontSize:size,color}); return label;
 }
 
-test('six avatar silhouettes stay distinct, bounded, and independent of ranking position', () => {
-  const game = gameFor(1920, 1080);
-  const signatures = new Set();
-  for (const score of [0, 50, 100, 200, 350, 500]) {
-    const g = recordingGraphics();
-    const points = [];
-    g.moveTo = (x, y) => points.push(['move', x, y]);
-    g.lineTo = (x, y) => points.push(['line', x, y]);
-    game.drawRankAvatar(g, 0, 0, 40, score);
-    signatures.add(JSON.stringify([g.rectangles, points]));
-    assert.ok(points.every(([, x, y]) => Math.abs(x) <= 40 && Math.abs(y) <= 40));
-    for (const shape of g.rectangles) {
-      const left = shape.circle ? shape.x - shape.radius : shape.x;
-      const right = shape.circle ? shape.x + shape.radius : shape.x + shape.width;
-      const bottom = shape.circle ? shape.y - shape.radius : shape.y;
-      const top = shape.circle ? shape.y + shape.radius : shape.y + shape.height;
-      assert.ok(left >= -40 && right <= 40 && bottom >= -40 && top <= 40);
-    }
+test('six authored avatar silhouettes stay bounded and depend on score tier rather than rank position', () => {
+  const game=gameFor(1920,1080), g=authoredVisual(), signatures=new Set();
+  for(const score of [0,50,100,200,350,500]) {
+    game.drawRankAvatar(g,0,0,40,score);
+    signatures.add(g.avatar.spriteFrame.uuid);
+    assert.deepEqual(visualRect(g.avatar),{x:-40,y:-40,width:80,height:80});
   }
-  assert.equal(signatures.size, 6, 'each tier differs by geometry, not just tint');
-  const king = recordingGraphics(); const starred = recordingGraphics();
-  game.drawRankAvatar(king, 0, 0, 21, 500);
-  game.drawRankAvatar(starred, 0, 0, 21, 1700);
-  assert.deepEqual(king.rectangles, starred.rectangles);
-  const home = makeHomeFixture(1920, 1080);
-  const seen = [];
-  home.drawRankAvatar = (...args) => seen.push(args[4]);
-  home.homeLeaderboardPreviewEntries = [{ score: 14 }, { score: 350 }, { score: 500 }];
-  home.updateHomeLeaderboardPreviewUI();
-  assert.deepEqual(seen, [14, 350, 500], 'preview maps score, not list index');
-  const { game: full } = projectorFixture(1920, 1080);
-  const fullSeen = [];
-  full.drawRankAvatar = (...args) => fullSeen.push(args[4]);
-  full.leaderboardEntries = home.homeLeaderboardPreviewEntries;
-  full.updateLeaderboardUI();
-  assert.deepEqual(fullSeen, seen);
+  assert.equal(signatures.size,6);
+  game.drawRankAvatar(g,0,0,21,500);const king=g.avatar.spriteFrame;
+  game.drawRankAvatar(g,0,0,21,1700);assert.equal(g.avatar.spriteFrame,king);
+  const home=makeHomeFixture(1920,1080), seen=[];
+  home.drawRankAvatar=(...args)=>seen.push(args[4]);
+  home.homeLeaderboardPreviewEntries=[{score:14},{score:350},{score:500}];home.updateHomeLeaderboardPreviewUI();
+  assert.deepEqual(seen,[14,350,500]);
+  const {game:full}=projectorFixture(1920,1080), fullSeen=[];
+  full.drawRankAvatar=(...args)=>fullSeen.push(args[4]);full.leaderboardEntries=home.homeLeaderboardPreviewEntries;full.updateLeaderboardUI();
+  assert.deepEqual(fullSeen,seen);
 });
 
-function recordingButton(game, group, name) {
-  const ui = game.makeMenuButton(group, name, name, 1, 1);
-  ui.graphics = recordingGraphics();
-  ui.graphics.node = ui.node;
-  return ui;
-}
+function recordingButton(game, group, name) { return uiFixture.button(group, name); }
 
 function projectorFixture(width, height) {
-  const game = gameFor(width, height);
-  game.reducedMotion = false;
-  game.setCenteredNodeLayout = (node, x, y) => node.setPosition(x, y, 0);
+  const game = makeHomeFixture(width, height);
   game.setTopLeftLayout = (node, top, left) => { node.edge = { top, left }; };
   game.setTopRightLayout = (node, top, right) => { node.edge = { top, right }; };
-  const groups = {
-    settings: ['SettingsTitle', 'SettingsHint'],
-    pause: ['PauseTitle', 'PauseHint', 'PauseControls'],
-    result: ['ResultTitle', 'ResultScore', 'ResultBest', 'ResultCoins', 'Restart'],
-    leaderboard: ['LeaderboardTitle', 'LeaderboardStatus', 'LeaderboardRankHeading', 'LeaderboardColumns',
-      'LeaderboardEmpty', 'LeaderboardScrollHint', 'LeaderboardScoreHeading'],
+  Object.assign(game, { phase: 'playing', score: 0, roundBestScore: 20, testModeEnabled: false,
+    roundWasTest: false, leaderboardEntries: [], leaderboardScrollTarget: 0, leaderboardLoading: false });
+  const buttons = {
+    settings: [game.soundToggle, game.motionToggle, { node:game.testModeToggle, graphics:game.testModeToggleGraphics, label:game.testModeToggleLabel }, game.nicknameButton, game.restoreStaminaButton, game.appearanceToggle, game.settingsCloseButton],
+    pause: ['resume','restart','home'].map(key => ({node:game[key+'Button'], graphics:game[key+'ButtonGraphics'], label:game[key+'ButtonLabel']})),
+    result: [game.resultReviveButton, game.resultRestartButton, game.resultHomeButton],
+    leaderboard: game.leaderboardButtons,
   };
-  for (const [kind, names] of Object.entries(groups)) {
-    const group = new Node(kind);
-    game[`${kind}Group`] = group;
-    for (const name of names) game.makeLabel(name, group, name, 1, new Color(), 1, 1);
-  }
-  game.leaderboardEmpty = game.leaderboardGroup.getChildByName('LeaderboardEmpty').getComponent(Label);
-  game.leaderboardGraphics = recordingGraphics();
-  game.leaderboardPageLabel = game.leaderboardGroup.getChildByName('LeaderboardScrollHint').getComponent(Label);
-  Object.assign(game, { leaderboardEntries: [], leaderboardScrollTarget: 0, leaderboardLoading: false });
-  game.leaderboardViewport = game.makeNode('Viewport', game.leaderboardGroup);
-  game.leaderboardViewport.addComponent(UITransform).setContentSize(520, 768);
-  game.leaderboardContent = game.makeNode('Content', game.leaderboardViewport);
-  game.leaderboardContent.addComponent(UITransform).setContentSize(520, 768);
-  game.leaderboardContent.setPosition(0, 384, 0);
-  game.leaderboardScroll = game.leaderboardViewport.addComponent(ScrollView);
-  game.leaderboardScroll.content = game.leaderboardContent;
-  const buttons = {};
-  buttons.settings = ['soundToggle', 'motionToggle', 'testToggle', 'nicknameButton', 'restoreStaminaButton', 'settingsCloseButton'].map(key => {
-    const ui = recordingButton(game, game.settingsGroup, key);
-    if (key === 'testToggle') Object.assign(game, { testModeToggle: ui.node, testModeToggleGraphics: ui.graphics, testModeToggleLabel: ui.label });
-    else game[key] = ui;
-    return ui;
-  });
-  game.nicknameLabel = game.makeLabel('CurrentNickname', game.nicknameButton.node, '', 1, new Color(), 1, 1);
-  buttons.pause = ['resume', 'restart', 'home'].map(key => {
-    const ui = recordingButton(game, game.pauseGroup, key);
-    Object.assign(game, { [`${key}Button`]: ui.node, [`${key}ButtonGraphics`]: ui.graphics, [`${key}ButtonLabel`]: ui.label });
-    return ui;
-  });
-  buttons.result = ['resultReviveButton', 'resultRestartButton', 'resultHomeButton'].map(key => {
-    const ui = recordingButton(game, game.resultGroup, key);
-    game[key] = ui;
-    return ui;
-  });
-  buttons.leaderboard = game.leaderboardButtons = ['close'].map(name => recordingButton(game, game.leaderboardGroup, name));
-  game.leaderboardRows = Array.from({ length: 10 }, (_, index) => {
-    const node = game.makeNode(`Row-${index}`, game.leaderboardContent);
-    node.addComponent(UITransform);
-    return { node, graphics: recordingGraphics(),
-      rank: game.makeLabel('Rank', node, '', 1, new Color(), 1, 1),
-      player: game.makeLabel('Player', node, '', 1, new Color(), 1, 1),
-      score: game.makeLabel('Score', node, '', 1, new Color(), 1, 1),
-      title: game.makeLabel('Title', node, '', 1, new Color(), 1, 1),
-      detail: game.makeLabel('Detail', node, '', 1, new Color(), 1, 1) };
-  });
-  const hud = game.gameplayHudGroup = new Node('GameplayHud');
-  Object.assign(game, { phase: 'playing', score: 0, roundBestScore: 20, testModeEnabled: false, roundWasTest: false });
-  for (const key of ['score', 'best']) {
-    const node = game.makeNode(`${key}Card`, hud);
-    node.addComponent(UITransform);
-    game[`${key}HudCard`] = node;
-    game[`${key}HudGraphics`] = node.addComponent(cc.Graphics);
-    game[`${key}CaptionLabel`] = game.makeLabel('Caption', node, '', 1, new Color(), 1, 1);
-    game[`${key}Label`] = game.makeLabel('Value', node, '', 1, new Color(), 1, 1);
-  }
-  const pause = recordingButton(game, hud, 'PauseButton');
-  game.pauseButton = pause.node;
-  game.pauseButtonLabel = pause.label;
-  game.testModeBadgeLabel = game.makeLabel('TestModeBadge', hud, '', 1, new Color(), 1, 1);
-  game.buildRecordGapHud();
+  game.leaderboardScroll.node.on(ScrollView.EventType.SCROLLING, game.updateLeaderboardScrollTrack, game);
   return { game, buttons };
 }
 
 function nicknameFixture(width = 1920, height = 1080) {
   const { game } = projectorFixture(width, height);
-  Object.assign(game, {
-    phase: 'ready', homeOverlay: 'settings', homeTransition: null,
-    playerNickname: '原来的昵称', nicknameEditing: false, nicknameInputActive: false,
-    nicknameSelection: 0, settingsSelection: 3,
-    hudSafeRoot: new Node('HudSafeRoot'), settingsGraphics: recordingGraphics(),
-  });
-  game.buildNicknameEditor();
-  for (const [type, method] of [
-    [EditBox.EventType.EDITING_DID_BEGAN, 'onNicknameInputBegan'],
-    [EditBox.EventType.EDITING_DID_ENDED, 'onNicknameInputEnded'],
-    [EditBox.EventType.EDITING_RETURN, 'onNicknameInputReturn'],
-  ]) game.nicknameEditor.node.on(type, game[method], game);
+  Object.assign(game, { phase:'ready', homeOverlay:'settings', homeTransition:null,
+    playerNickname:'原来的昵称', nicknameEditing:false, nicknameInputActive:false,
+    nicknameSelection:0, settingsSelection:3 });
+  for (const [type,method] of [[EditBox.EventType.EDITING_DID_BEGAN,'onNicknameInputBegan'],
+    [EditBox.EventType.EDITING_DID_ENDED,'onNicknameInputEnded'], [EditBox.EventType.EDITING_RETURN,'onNicknameInputReturn']]) {
+    game.nicknameEditor.node.on(type, game[method], game);
+  }
   return game;
 }
 
-test('nickname EditBox is configured under an inactive group before its native input can be created', () => {
-  const game = nicknameFixture();
-  assert.equal(game.nicknameEditor.activeHierarchyWhenAdded, false,
-    'adding an active EditBox would create the default multiline textarea before SINGLE_LINE is configured');
-  assert.equal(game.nicknameGroup.active, false);
-  assert.equal(game.nicknameEditor.inputMode, EditBox.InputMode.SINGLE_LINE);
-  assert.equal(game.nicknameEditor.inputFlag, EditBox.InputFlag.DEFAULT);
-  assert.equal(game.nicknameEditor.returnType, EditBox.KeyboardReturnType.DONE);
-  assert.ok(game.nicknameEditor.textLabel && game.nicknameEditor.placeholderLabel);
+test('nickname EditBox is serialized as single-line under an inactive dialog before activation', () => {
+  const game=nicknameFixture();
+  assert.equal(game.nicknameGroup.active,false);
+  assert.equal(game.nicknameEditor.inputMode,EditBox.InputMode.SINGLE_LINE);
+  assert.equal(game.nicknameEditor.inputFlag,EditBox.InputFlag.DEFAULT);
+  assert.equal(game.nicknameEditor.returnType,EditBox.KeyboardReturnType.DONE);
+  assert.ok(game.nicknameEditor.textLabel&&game.nicknameEditor.placeholderLabel);
   game.openNicknameEditor();
-  assert.equal(game.nicknameGroup.active, true);
-  assert.equal(game.nicknameEditor.inputMode, EditBox.InputMode.SINGLE_LINE);
-  assert.equal(game.nicknameEditor.isFocused(), true);
+  assert.equal(game.nicknameGroup.active,true);
+  assert.equal(game.nicknameEditor.inputMode,EditBox.InputMode.SINGLE_LINE);
+  assert.equal(game.nicknameEditor.isFocused(),true);
 });
 
-test('nickname input reuses Cocos-generated labels rather than leaving duplicate text underneath', t => {
-  EditBox.provideDefaultLabels = true;
-  t.after(() => { EditBox.provideDefaultLabels = false; });
-  const game = nicknameFixture();
-  assert.equal(game.nicknameEditor.textLabel, game.nicknameEditor.defaultTextLabel);
-  assert.equal(game.nicknameEditor.placeholderLabel, game.nicknameEditor.defaultPlaceholderLabel);
-  assert.equal(game.nicknameEditor.node.children.filter(node => node.getComponent(Label)).length, 2);
-  assert.equal(game.nicknameEditor.node.getChildByName('NicknameText'), undefined);
-  assert.equal(game.nicknameEditor.placeholderLabel.string, '输入你的昵称');
-  assert.equal(game.nicknameEditor.textLabel.verticalAlign, Label.VerticalAlign.CENTER);
+test('nickname input binds exactly two authored labels without dynamically creating duplicate text', () => {
+  const game=nicknameFixture();
+  const labels=game.nicknameEditor.node.children.filter(node=>node.getComponent(Label));
+  assert.equal(labels.length,2);
+  assert.ok(labels.includes(game.nicknameEditor.textLabel.node));
+  assert.ok(labels.includes(game.nicknameEditor.placeholderLabel.node));
+  assert.equal(game.nicknameEditor.placeholderLabel.string,'输入你的昵称');
+  assert.equal(game.nicknameEditor.textLabel.verticalAlign,Label.VerticalAlign.CENTER);
+  const before=labels.slice();game.openNicknameEditor();game.updateNicknameEditorUI();
+  assert.ok(before.every(node=>game.nicknameEditor.node.children.includes(node)));
 });
 
 test('nickname editor opens only from settings, returns focus on cancel and keeps existing player/round names intact', () => {
@@ -953,7 +829,7 @@ test('cream nickname input, labels and focused Save/Cancel targets fit narrow an
     for (const selection of [0, 1, 2]) {
       game.nicknameSelection = selection;
       game.updateNicknameEditorUI();
-      const panel = game.nicknameGraphics.rectangles[0];
+      const panel = visualRect(game.nicknameGraphics.fill);
       assert.equal(panel.x + panel.width / 2, 0, 'dialog is centered');
       assert.ok(panel.x >= -game.visibleWidth / 2 + 28);
       assert.ok(panel.x + panel.width <= game.visibleWidth / 2 - 28);
@@ -1079,11 +955,11 @@ function roundFixture(bestScore, playerNickname = leaderboardData.DEFAULT_NICKNA
   Object.assign(game, {
     bestScore, coins: 0, homeOverlay: 'none', playerNickname,
     startGroup: new Node('StartScreen'),
-    world3D: { reset() {} },
+    world3D: { reset() {}, restoreStack(){},spawnMovingBlock(){},prepareProjection(){},resetActionClock(){} },
     resetPerfectFeedback() {}, updateWorldComposition() {}, playSound() {},
     recordLeaderboardResult() {}, saveBestScore() {}, saveEconomy() {},
   });
-  game.homeBestLabel = game.makeLabel('HomeBest', game.startGroup, '', 1, new Color(), 1, 1);
+  game.homeBestLabel = makeLabel('HomeBest', game.startGroup, '', 1, new Color(), 1, 1);
   for (const [key, name] of Object.entries({
     resultTitleLabel: 'ResultTitle', resultScoreLabel: 'ResultScore',
     resultBestLabel: 'ResultBest', resultCoinLabel: 'ResultCoins',
@@ -1180,14 +1056,12 @@ test('continuous ranking scroll clamps both ends, preserves resize position and 
 
 test('ranking construction uses a masked native scroll viewport, ten reusable rows and only a close control', () => {
   const { game } = projectorFixture(1920, 1080);
-  game.hudSafeRoot = new Node('SafeRoot');
-  game.leaderboardRows = [];
-  game.leaderboardButtons = [];
-  game.leaderboardHandlers = [];
-  game.buildLeaderboardUI();
   assert.equal(game.leaderboardRows.length, 10);
   assert.equal(game.leaderboardButtons.length, 1);
-  assert.equal(game.leaderboardButtons[0].label.string, '×');
+  game.updateLeaderboardUI();
+  assert.equal(game.leaderboardButtons[0].label.string, '');
+  assert.equal(game.leaderboardButtons[0].graphics.accent.node.angle,45);
+  assert.equal(game.leaderboardButtons[0].graphics.detail.node.angle,-45);
   assert.equal(game.leaderboardViewport.getComponent(cc.MaskComponent).type, cc.MaskComponent.Type.GRAPHICS_RECT);
   assert.equal(game.leaderboardScroll.horizontal, false);
   assert.equal(game.leaderboardScroll.vertical, true);
@@ -1215,9 +1089,9 @@ test('cream leaderboard retains readable text on normal and highlighted pastel r
       }
     }
     assert.equal(game.leaderboardRows[0].title.string, '王者 +2 星');
-    assert.ok(game.leaderboardRows.slice(0, 3).every(row => row.graphics.rectangles.filter(shape => shape.circle).length >= 4));
-    assert.equal(game.leaderboardRows[3].graphics.rectangles.some(shape => shape.circle), true, 'every rank has a tier avatar');
-    assert.equal(game.leaderboardButtons[0].graphics.rectangles.length, 0, 'close remains a line cross');
+    assert.ok(game.leaderboardRows.slice(0,3).every(row=>row.graphics.avatar.node.active&&row.graphics.badge.node.active));
+    assert.equal(game.leaderboardRows[3].graphics.avatar.node.active,true,'every rank has a tier avatar');
+    assert.equal(game.leaderboardButtons[0].graphics.fill.node.active,false,'close remains a line cross');
     assert.equal(game.leaderboardRows[0].player.string, '十二个字昵称完整显示测试中 · 本局');
     assert.ok(game.leaderboardRows.slice(0, 4).every(row => row.title.isBold));
   }
@@ -1338,15 +1212,15 @@ test('all projector screen buttons share homepage focus drawing and their real h
         const hit = ui.node.getComponent(UITransform);
         assert.equal(hit.width, layout.buttonWidth, `${width}x${height} ${kind}: hit width`);
         assert.equal(hit.height, layout.buttonHeight, `${width}x${height} ${kind}: hit height`);
-        const fill = ui.graphics.rectangles[0];
+        const fill = visualRect(ui.graphics.fill);
         assert.equal(fill.width, hit.width);
         assert.equal(fill.height, hit.height);
         assert.equal(ui.node.scale.x, selected ? 1.018 : 1, 'no compounded TV scale');
         if (selected) {
-          const ring = ui.graphics.rectangles.at(-1);
-          assert.equal(ring.width, hit.width + 16, 'focus ring uses homepage expansion');
-          assert.equal(ring.height, hit.height + 16);
-          assert.equal(ui.graphics.strokes.at(-1).width, 4);
+          const ring = visualRect(ui.graphics.focus);
+          assert.equal(ring.width, hit.width + 20, 'outer Sprite includes the four-pixel focus stroke');
+          assert.equal(ring.height, hit.height + 20);
+          assert.equal(ui.graphics.focus.node.active, true);
         }
       }
     }
@@ -1391,10 +1265,10 @@ test('pause and result focus route the shared layout dimensions to the selected 
 
 test('settings state pills remain distinct from their caption and share button focus contrast', () => {
   for (const [width, height] of frames) {
-    const game = gameFor(width, height);
+    const game = makeHomeFixture(width, height);
     game.reducedMotion = false;
     const layout = game.panelLayout('settings');
-    const ui = recordingButton(game, new Node('Settings'), 'Toggle');
+    const ui = game.motionToggle;
     for (const enabled of [true, false]) {
       for (const selected of [true, false]) {
         game.drawSettingToggle(ui, '减少动态效果', enabled, selected);
@@ -1451,7 +1325,7 @@ test('pause hides the entire gameplay HUD and resume restores the prior phase wi
         assert.equal(game.pauseGroup.active, true);
         assert.equal(game.pauseSelection, 0, 'resume receives initial focus');
         assert.equal(game.resumeInputLock, 0);
-        assert.ok(game.lastActionAt >= before);
+        assert.ok(game.inputRouter.lastAction >= before);
         assert.equal(feedbackResets, 1);
         assert.deepEqual(paused, [true]);
         game.pauseGame();
@@ -1471,6 +1345,7 @@ test('pause hides the entire gameplay HUD and resume restores the prior phase wi
         game.tryPrimaryAction();
         assert.equal(placed, 0, 'resume confirmation cannot immediately drop a block');
         game.resumeInputLock = 0;
+        game.inputRouter.clear();
         game.tryPrimaryAction();
         assert.equal(placed, previousPhase === 'playing' ? 1 : 0, 'dropping resumes without creating a second placement');
         game.resumeGame();
@@ -1494,7 +1369,7 @@ test('the fixed cream style supplies high-contrast home, preview and record-hint
   game.drawPauseHudButton = () => {};
   const style = CREAM_STYLE;
   home.updateHomeLeaderboardPreviewUI();
-  const previewBackground = home.homeLeaderboardPreviewGraphics.fills[0];
+  const previewBackground = home.homeLeaderboardPreviewGraphics.fill.color;
   assert.deepEqual([previewBackground.r, previewBackground.g, previewBackground.b], Array.from(style.panelColor));
   assert.equal(previewBackground.a, 255, 'preview has its own opaque backdrop');
   for (const label of [home.homeLeaderboardPreviewTitle, home.homeLeaderboardPreviewSubtitle,
@@ -1506,12 +1381,12 @@ test('the fixed cream style supplies high-contrast home, preview and record-hint
   assert.ok(contrast(home.homeLeaderboardPreviewHint.color,
     [220, 235, 222]) >= 4.5, 'preview action is readable on its own fill');
   game.drawGameplayHudCards();
-  const hintBackground = game.recordGapGraphics.fills[0];
+  const hintBackground = game.recordGapGraphics.fill.color;
   assert.deepEqual([hintBackground.r, hintBackground.g, hintBackground.b], Array.from(style.panelColor));
   assert.equal(hintBackground.a, 255, 'record hint uses its own opaque backdrop');
   assert.ok(contrast(game.recordGapLabel.color, style.panelColor) >= 4.5, 'record hint remains readable');
   assert.equal(game.recordGapLabel.color.a, 255);
-  const hintRect = game.recordGapGraphics.rectangles[0];
+  const hintRect = visualRect(game.recordGapGraphics.fill);
   assert.equal(hintRect.width, game.hudLayout().recordGapWidth);
   assert.equal(hintRect.height, game.hudLayout().recordGapHeight);
   for (const background of [style.panelColor, style.buttonColor, style.accentColor]) {
@@ -1523,17 +1398,37 @@ test('the fixed cream style supplies high-contrast home, preview and record-hint
     assert.ok(contrast(text, background) >= 4.5, 'text contrast is at least 4.5:1');
   }
   for (const selected of [false, true]) {
-    const graphics = recordingGraphics();
+    const graphics = authoredVisual();
     const label = new Label();
     game.drawHomeButton(graphics, label, 620, 116, selected);
     assert.ok(contrast(label.color, selected ? style.accentColor : style.buttonColor) >= 4.5,
       `${selected ? 'focused' : 'unfocused'} button caption retains contrast`);
     if (selected) {
-      const outerRing = graphics.strokes.at(-1);
-      assert.ok(outerRing.width >= 4);
-      assert.ok(contrast(outerRing.color, style.panelColor) >= 4.5, 'outer focus ring is visible against panel');
-      assert.ok(contrast(graphics.fills.at(-1), style.accentColor) >= 4.5, 'focus pointer is visible against button');
+      assert.ok(graphics.focus.node.active);
+      assert.ok(contrast(graphics.focus.color, style.panelColor) >= 4.5, 'outer focus ring is visible against panel');
+      assert.ok(contrast(graphics.arrow.color, style.accentColor) >= 4.5, 'focus pointer is visible against button');
       assert.equal(graphics.node.scale.x, 1.018);
     }
+  }
+});
+
+
+test('used revival compacts result actions and redirects focus to restart', () => {
+  for (const [width, height] of frames) {
+    const game = gameFor(width, height);
+    const group = new Node('Result');
+    game.resultReviveButton = recordingButton(game, group, 'revive');
+    game.resultRestartButton = recordingButton(game, group, 'restart');
+    game.resultHomeButton = recordingButton(game, group, 'home');
+    game.reviveUsed = true;
+    game.resultSelection = 0;
+    const positions = [];
+    game.layoutPanelButton = (button, x, y) => positions.push({button, y});
+    game.drawOverlayButton = () => {};
+    game.updateResultFocus();
+    const layout = game.panelLayout('result');
+    assert.equal(game.resultSelection, 1);
+    assert.deepEqual(positions.map(item => item.button), [game.resultRestartButton, game.resultHomeButton]);
+    assert.deepEqual(positions.map(item => item.y), Array.from(layout.buttonYs.slice(0, 2)));
   }
 });

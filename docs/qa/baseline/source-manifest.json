@@ -1,0 +1,44 @@
+{
+  "snapshot": "/private/tmp/wxstack-ui-refactor-baseline",
+  "project": "/private/tmp/wxstack-ui-baseline-project",
+  "unchangedSnapshotInputs": {
+    "scripts/CreamStyle.ts": "8712dc6097749ec5820ac1821e3af59d131bfc593a4d64120ec06ffae674e6cd",
+    "scripts/CreamStyle.ts.meta": "7d68866b37aa9d7e71066a5b50af0f3cf44c56205fdb8676f21e30ac112604b5",
+    "scripts/Leaderboard.ts": "24241790668dd95afc373c9bea845b2aa08630a11283716ee9cd5551a0207723",
+    "scripts/Leaderboard.ts.meta": "ea763b48fdeb17185b002ea504d14a142e8680102a2745c9fc6a250a7cc16a93",
+    "scripts/ProjectorLayout.ts": "2afa0b3ff75162cf649c3c4c6108bed6ac49ccc617e50ffd68e357840c9e008c",
+    "scripts/ProjectorLayout.ts.meta": "dfe97d85037d556945a892139836c9ea52fbf29ece2b6e756553c1a8532db1bd",
+    "scripts/RemoteInput.ts": "b81ef8f8f0cc6c81cf6345ed4ed05a1f1cc3777963d806e3fe22f69abf621cd1",
+    "scripts/RemoteInput.ts.meta": "e0acdbe576d0241743f7b2dac6e06bdf5bd712776e2ba717a39c78ef8fd11dfd",
+    "scripts/ReviveClient.ts": "9900dd1eb183581ba8d23363d030b21f4bc916f839c3d8a3319838c04620a261",
+    "scripts/ReviveClient.ts.meta": "7073fcc72e60e385f70e9007f1bfdbe347403a881aa2c1c01eca7f6ea83df825",
+    "scripts/StackGame.ts": "2e623e25ca29798e1235a9b840346d6fae0f039b4c45fa056d92dfe445880410",
+    "scripts/StackGame.ts.meta": "1b92637e143f4ee0e4a77cf8ac3523ee392ff63e9ea88ba0bf9105a7a6b0dcd1",
+    "scripts/StackWorld3D.ts": "fec2bd15ff96f4e7fc5cd4e99029ba75e65ff20ff37bbdb122d047bcd2419c97",
+    "scripts/StackWorld3D.ts.meta": "497808482ebd4ae489a55226d35cf0044df00743b77669091a3bec1ee8ef55ea",
+    "scripts/Stamina.ts": "39a98584c8457b8dda819ad8726a4618b718538e9c7d65889bbdf7ec6dcb5086",
+    "scripts/Stamina.ts.meta": "48f22b52cc0a0369c4af52726f83a7ecb5f6a7a078b55a6cb51f1b0e1b2644b1",
+    "scenes/Stack.scene": "f69a88e134d95889e004d6b51402fd4c18a0b5d4dac71b96e0c26e0dd469b4aa",
+    "scenes/Stack.scene.meta": "3ff7f85ccd4e858fa9147e72826d8d3abe060b65a742e442f557d6d3ca82f294"
+  },
+  "otherInputs": [
+    "assets/resources copied from current project",
+    "asset folder metadata copied from current project",
+    "build-templates copied from current project",
+    "profiles copied from current project"
+  ],
+  "postBuildSnapshotInputsUnchanged": true,
+  "postBuildChangedInputs": [],
+  "screenshotHashes": {
+    "1920x1080-gameplay.png": "49b58663ff99355ae559016b94fae937a1ad5df0f0e54b5f28386d3cf25a5f30",
+    "1920x1080-home.png": "78fa33bae8bbeb7a993ca50ab9d84ea06115ab78938d042175774d9709844054",
+    "1920x1080-leaderboard-empty.png": "22bf8d0cebcf2eda077bfc809c00ba01821068984b7fc15e3d4654134661abf0",
+    "1920x1080-nickname.png": "a1a9b4e25804b2e6cea069658e4b1937f5a4a132c43ddaf70780523061bc81ea",
+    "1920x1080-pause.png": "e48904dd3cf8ebfe4f5c55e592e69f7b0969b17914b2755db0628fefc83d52d4",
+    "1920x1080-result-zero.png": "d82fcda9eab88df5a82c7fe118d85a20aef76e6ac4aaf8d63b20dd4e42dfc4dc",
+    "1920x1080-settings.png": "6ce9c884b03a706e7726886cf56ebe60ef48801d47b859cfe27df5df884407ea",
+    "390x844-home.png": "8f662a82e5e3beb9ecb2fa0700f2af1dc13634a78b794ce6652aa6eba46c2d99",
+    "390x844-leaderboard-empty.png": "9e71b984f32d35b5782bd24c0188451a2d1bd61740ec61abc92ce7bd8def44c1",
+    "390x844-settings.png": "3e73819cae6a6e74299d259e4e61ecbf09ddb3ecb6b1ca21c6c0e0f7d8e0f311"
+  }
+}

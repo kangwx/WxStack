@@ -1,0 +1,422 @@
+{
+  "kind": "real-browser-before-refactor-screenshots",
+  "capturedAt": "2026-09-14T11:08:19.142Z",
+  "project": "/private/tmp/wxstack-ui-baseline-project",
+  "source": "/private/tmp/wxstack-ui-refactor-baseline",
+  "url": "http://127.0.0.1:7467/",
+  "creator": "3.8.8",
+  "build": "web-mobile debug=true",
+  "deviceScaleFactor": 1,
+  "profile": "Separate Chrome process with a temporary Playwright profile and fresh browser context per viewport",
+  "launchArgs": [
+    "--enable-webgl",
+    "--ignore-gpu-blocklist",
+    "--autoplay-policy=no-user-gesture-required"
+  ],
+  "captures": [
+    {
+      "file": "1920x1080-home.png",
+      "viewport": {
+        "width": 1920,
+        "height": 1080
+      },
+      "state": {
+        "phase": "ready",
+        "overlay": "none",
+        "score": 0,
+        "coins": 100,
+        "bestScore": 0,
+        "nickname": "叠叠玩家",
+        "stamina": 5,
+        "reducedMotion": false,
+        "framebuffer": {
+          "width": 1920,
+          "height": 1080
+        },
+        "renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M1 Pro, Unspecified Version)"
+      }
+    },
+    {
+      "file": "1920x1080-settings.png",
+      "viewport": {
+        "width": 1920,
+        "height": 1080
+      },
+      "state": {
+        "phase": "ready",
+        "overlay": "settings",
+        "score": 0,
+        "coins": 100,
+        "bestScore": 0,
+        "nickname": "叠叠玩家",
+        "stamina": 5,
+        "reducedMotion": false,
+        "framebuffer": {
+          "width": 1920,
+          "height": 1080
+        },
+        "renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M1 Pro, Unspecified Version)"
+      }
+    },
+    {
+      "file": "1920x1080-nickname.png",
+      "viewport": {
+        "width": 1920,
+        "height": 1080
+      },
+      "state": {
+        "phase": "ready",
+        "overlay": "settings",
+        "score": 0,
+        "coins": 100,
+        "bestScore": 0,
+        "nickname": "叠叠玩家",
+        "stamina": 5,
+        "reducedMotion": false,
+        "framebuffer": {
+          "width": 1920,
+          "height": 1080
+        },
+        "renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M1 Pro, Unspecified Version)"
+      }
+    },
+    {
+      "file": "1920x1080-leaderboard-empty.png",
+      "viewport": {
+        "width": 1920,
+        "height": 1080
+      },
+      "state": {
+        "phase": "ready",
+        "overlay": "leaderboard",
+        "score": 0,
+        "coins": 100,
+        "bestScore": 0,
+        "nickname": "叠叠玩家",
+        "stamina": 5,
+        "reducedMotion": false,
+        "framebuffer": {
+          "width": 1920,
+          "height": 1080
+        },
+        "renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M1 Pro, Unspecified Version)"
+      }
+    },
+    {
+      "file": "1920x1080-gameplay.png",
+      "viewport": {
+        "width": 1920,
+        "height": 1080
+      },
+      "state": {
+        "phase": "playing",
+        "overlay": "none",
+        "score": 0,
+        "coins": 100,
+        "bestScore": 0,
+        "nickname": "叠叠玩家",
+        "stamina": 4,
+        "reducedMotion": false,
+        "framebuffer": {
+          "width": 1920,
+          "height": 1080
+        },
+        "renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M1 Pro, Unspecified Version)"
+      }
+    },
+    {
+      "file": "1920x1080-pause.png",
+      "viewport": {
+        "width": 1920,
+        "height": 1080
+      },
+      "state": {
+        "phase": "paused",
+        "overlay": "none",
+        "score": 0,
+        "coins": 100,
+        "bestScore": 0,
+        "nickname": "叠叠玩家",
+        "stamina": 4,
+        "reducedMotion": false,
+        "framebuffer": {
+          "width": 1920,
+          "height": 1080
+        },
+        "renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M1 Pro, Unspecified Version)"
+      }
+    },
+    {
+      "file": "1920x1080-result-zero.png",
+      "viewport": {
+        "width": 1920,
+        "height": 1080
+      },
+      "state": {
+        "phase": "gameover",
+        "overlay": "none",
+        "score": 0,
+        "coins": 100,
+        "bestScore": 0,
+        "nickname": "叠叠玩家",
+        "stamina": 4,
+        "reducedMotion": false,
+        "framebuffer": {
+          "width": 1920,
+          "height": 1080
+        },
+        "renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M1 Pro, Unspecified Version)"
+      }
+    },
+    {
+      "file": "390x844-home.png",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "state": {
+        "phase": "ready",
+        "overlay": "none",
+        "score": 0,
+        "coins": 100,
+        "bestScore": 0,
+        "nickname": "叠叠玩家",
+        "stamina": 5,
+        "reducedMotion": false,
+        "framebuffer": {
+          "width": 390,
+          "height": 844
+        },
+        "renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M1 Pro, Unspecified Version)"
+      }
+    },
+    {
+      "file": "390x844-settings.png",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "state": {
+        "phase": "ready",
+        "overlay": "settings",
+        "score": 0,
+        "coins": 100,
+        "bestScore": 0,
+        "nickname": "叠叠玩家",
+        "stamina": 5,
+        "reducedMotion": false,
+        "framebuffer": {
+          "width": 390,
+          "height": 844
+        },
+        "renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M1 Pro, Unspecified Version)"
+      }
+    },
+    {
+      "file": "390x844-leaderboard-empty.png",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "state": {
+        "phase": "ready",
+        "overlay": "leaderboard",
+        "score": 0,
+        "coins": 100,
+        "bestScore": 0,
+        "nickname": "叠叠玩家",
+        "stamina": 5,
+        "reducedMotion": false,
+        "framebuffer": {
+          "width": 390,
+          "height": 844
+        },
+        "renderer": "ANGLE (Apple, ANGLE Metal Renderer: Apple M1 Pro, Unspecified Version)"
+      }
+    }
+  ],
+  "logs": [
+    {
+      "viewport": "1920x1080",
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 404 (File not found)"
+    },
+    {
+      "viewport": "1920x1080",
+      "type": "timeEnd",
+      "text": "Init Base: 9.324951171875 ms"
+    },
+    {
+      "viewport": "1920x1080",
+      "type": "timeEnd",
+      "text": "Init Infrastructure: 17.265869140625 ms"
+    },
+    {
+      "viewport": "1920x1080",
+      "type": "log",
+      "text": "[bullet]:bullet wasm lib loaded."
+    },
+    {
+      "viewport": "1920x1080",
+      "type": "log",
+      "text": "[PHYSICS]: register bullet."
+    },
+    {
+      "viewport": "1920x1080",
+      "type": "log",
+      "text": "[PHYSICS]: using bullet."
+    },
+    {
+      "viewport": "1920x1080",
+      "type": "timeEnd",
+      "text": "Init SubSystem: 39.351806640625 ms"
+    },
+    {
+      "viewport": "1920x1080",
+      "type": "log",
+      "text": "Cocos Creator v3.8.8"
+    },
+    {
+      "viewport": "1920x1080",
+      "type": "log",
+      "text": "Using custom pipeline: Builtin"
+    },
+    {
+      "viewport": "1920x1080",
+      "type": "timeEnd",
+      "text": "Init Project: 22.43603515625 ms"
+    },
+    {
+      "viewport": "1920x1080",
+      "type": "timeEnd",
+      "text": "LoadScene db://assets/scenes/Stack.scene: 17.261962890625 ms"
+    },
+    {
+      "viewport": "1920x1080",
+      "type": "timeEnd",
+      "text": "InitScene: 0.09912109375 ms"
+    },
+    {
+      "viewport": "1920x1080",
+      "type": "timeEnd",
+      "text": "AttachPersist: 0.051025390625 ms"
+    },
+    {
+      "viewport": "1920x1080",
+      "type": "timeEnd",
+      "text": "AutoRelease: 0.057861328125 ms"
+    },
+    {
+      "viewport": "1920x1080",
+      "type": "timeEnd",
+      "text": "Destroy: 0.075927734375 ms"
+    },
+    {
+      "viewport": "1920x1080",
+      "type": "timeEnd",
+      "text": "Activate: 52.27392578125 ms"
+    },
+    {
+      "viewport": "1920x1080",
+      "type": "log",
+      "text": "Success to load scene: db://assets/scenes/Stack.scene"
+    },
+    {
+      "viewport": "1920x1080",
+      "type": "warning",
+      "text": "Can't add renderable component to this node because it already have one."
+    },
+    {
+      "viewport": "1920x1080",
+      "type": "error",
+      "text": "Failed to load resource: the server responded with a status of 404 (File not found)"
+    },
+    {
+      "viewport": "390x844",
+      "type": "timeEnd",
+      "text": "Init Base: 8.405029296875 ms"
+    },
+    {
+      "viewport": "390x844",
+      "type": "timeEnd",
+      "text": "Init Infrastructure: 13.1650390625 ms"
+    },
+    {
+      "viewport": "390x844",
+      "type": "log",
+      "text": "[bullet]:bullet wasm lib loaded."
+    },
+    {
+      "viewport": "390x844",
+      "type": "log",
+      "text": "[PHYSICS]: register bullet."
+    },
+    {
+      "viewport": "390x844",
+      "type": "log",
+      "text": "[PHYSICS]: using bullet."
+    },
+    {
+      "viewport": "390x844",
+      "type": "timeEnd",
+      "text": "Init SubSystem: 28.090087890625 ms"
+    },
+    {
+      "viewport": "390x844",
+      "type": "log",
+      "text": "Cocos Creator v3.8.8"
+    },
+    {
+      "viewport": "390x844",
+      "type": "log",
+      "text": "Using custom pipeline: Builtin"
+    },
+    {
+      "viewport": "390x844",
+      "type": "timeEnd",
+      "text": "Init Project: 20.802001953125 ms"
+    },
+    {
+      "viewport": "390x844",
+      "type": "timeEnd",
+      "text": "LoadScene db://assets/scenes/Stack.scene: 17.191162109375 ms"
+    },
+    {
+      "viewport": "390x844",
+      "type": "timeEnd",
+      "text": "InitScene: 0.090087890625 ms"
+    },
+    {
+      "viewport": "390x844",
+      "type": "timeEnd",
+      "text": "AttachPersist: 0.054931640625 ms"
+    },
+    {
+      "viewport": "390x844",
+      "type": "timeEnd",
+      "text": "AutoRelease: 0.06005859375 ms"
+    },
+    {
+      "viewport": "390x844",
+      "type": "timeEnd",
+      "text": "Destroy: 0.090087890625 ms"
+    },
+    {
+      "viewport": "390x844",
+      "type": "timeEnd",
+      "text": "Activate: 52.178955078125 ms"
+    },
+    {
+      "viewport": "390x844",
+      "type": "log",
+      "text": "Success to load scene: db://assets/scenes/Stack.scene"
+    }
+  ],
+  "errors": [],
+  "notes": [
+    "Screenshots are rendered by Chrome, not an offline Cocos stub.",
+    "No project source has been changed. Navigation invokes existing methods; zero-score failure uses real keyboard release beyond the support footprint.",
+    "These screenshots do not constitute Android, projection-device or release-performance acceptance."
+  ],
+  "browserVersion": "152.0.7977.83"
+}

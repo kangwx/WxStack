@@ -1,0 +1,1568 @@
+{
+  "fields": {
+    "homeLeaderboardPreviewRows[0]": {
+      "type": "Label",
+      "path": "SafeHud/HomeScreenLayoutRoot/VisualRoot/HomeLeaderboardPreview/PreviewRank-0"
+    },
+    "homeLeaderboardPreviewRows[1]": {
+      "type": "Label",
+      "path": "SafeHud/HomeScreenLayoutRoot/VisualRoot/HomeLeaderboardPreview/PreviewRank-1"
+    },
+    "homeLeaderboardPreviewRows[2]": {
+      "type": "Label",
+      "path": "SafeHud/HomeScreenLayoutRoot/VisualRoot/HomeLeaderboardPreview/PreviewRank-2"
+    },
+    "homeLeaderboardPreviewRows": {
+      "type": "Label",
+      "array": true
+    },
+    "homeLeaderboardPreviewDetails[0]": {
+      "type": "Label",
+      "path": "SafeHud/HomeScreenLayoutRoot/VisualRoot/HomeLeaderboardPreview/PreviewPlayer-0"
+    },
+    "homeLeaderboardPreviewDetails[1]": {
+      "type": "Label",
+      "path": "SafeHud/HomeScreenLayoutRoot/VisualRoot/HomeLeaderboardPreview/PreviewPlayer-1"
+    },
+    "homeLeaderboardPreviewDetails[2]": {
+      "type": "Label",
+      "path": "SafeHud/HomeScreenLayoutRoot/VisualRoot/HomeLeaderboardPreview/PreviewPlayer-2"
+    },
+    "homeLeaderboardPreviewDetails": {
+      "type": "Label",
+      "array": true
+    },
+    "homeLeaderboardPreviewRanks[0]": {
+      "type": "Label",
+      "path": "SafeHud/HomeScreenLayoutRoot/VisualRoot/HomeLeaderboardPreview/PreviewMedal-0"
+    },
+    "homeLeaderboardPreviewRanks[1]": {
+      "type": "Label",
+      "path": "SafeHud/HomeScreenLayoutRoot/VisualRoot/HomeLeaderboardPreview/PreviewMedal-1"
+    },
+    "homeLeaderboardPreviewRanks[2]": {
+      "type": "Label",
+      "path": "SafeHud/HomeScreenLayoutRoot/VisualRoot/HomeLeaderboardPreview/PreviewMedal-2"
+    },
+    "homeLeaderboardPreviewRanks": {
+      "type": "Label",
+      "array": true
+    },
+    "homeLeaderboardPreviewTitles[0]": {
+      "type": "Label",
+      "path": "SafeHud/HomeScreenLayoutRoot/VisualRoot/HomeLeaderboardPreview/PreviewTitle-0"
+    },
+    "homeLeaderboardPreviewTitles[1]": {
+      "type": "Label",
+      "path": "SafeHud/HomeScreenLayoutRoot/VisualRoot/HomeLeaderboardPreview/PreviewTitle-1"
+    },
+    "homeLeaderboardPreviewTitles[2]": {
+      "type": "Label",
+      "path": "SafeHud/HomeScreenLayoutRoot/VisualRoot/HomeLeaderboardPreview/PreviewTitle-2"
+    },
+    "homeLeaderboardPreviewTitles": {
+      "type": "Label",
+      "array": true
+    },
+    "leaderboardRows": {
+      "type": "StackLeaderboardRowBinding",
+      "array": true
+    },
+    "leaderboardButtons": {
+      "type": "StackUIButtonBinding",
+      "array": true
+    },
+    "screenDimmer": {
+      "type": "Sprite",
+      "path": "ScreenDimmer/Dimmer"
+    },
+    "hudSafeRoot": {
+      "type": "Node",
+      "path": "SafeHud"
+    },
+    "gameplayHudGroup": {
+      "type": "Node",
+      "path": "SafeHud/GameplayHUDLayoutRoot/VisualRoot"
+    },
+    "scoreHudCard": {
+      "type": "Node",
+      "path": "SafeHud/GameplayHUDLayoutRoot/VisualRoot/ScoreHudCard"
+    },
+    "scoreHudGraphics": {
+      "type": "StackUIVisual",
+      "path": "SafeHud/GameplayHUDLayoutRoot/VisualRoot/ScoreHudCard"
+    },
+    "scoreCaptionLabel": {
+      "type": "Label",
+      "path": "SafeHud/GameplayHUDLayoutRoot/VisualRoot/ScoreHudCard/ScoreCaption"
+    },
+    "scoreLabel": {
+      "type": "Label",
+      "path": "SafeHud/GameplayHUDLayoutRoot/VisualRoot/ScoreHudCard/Score"
+    },
+    "bestHudCard": {
+      "type": "Node",
+      "path": "SafeHud/GameplayHUDLayoutRoot/VisualRoot/BestHudCard"
+    },
+    "bestHudGraphics": {
+      "type": "StackUIVisual",
+      "path": "SafeHud/GameplayHUDLayoutRoot/VisualRoot/BestHudCard"
+    },
+    "bestCaptionLabel": {
+      "type": "Label",
+      "path": "SafeHud/GameplayHUDLayoutRoot/VisualRoot/BestHudCard/BestCaption"
+    },
+    "bestLabel": {
+      "type": "Label",
+      "path": "SafeHud/GameplayHUDLayoutRoot/VisualRoot/BestHudCard/Best"
+    },
+    "recordGapNode": {
+      "type": "Node",
+      "path": "SafeHud/GameplayHUDLayoutRoot/VisualRoot/RecordGap"
+    },
+    "recordGapGraphics": {
+      "type": "StackUIVisual",
+      "path": "SafeHud/GameplayHUDLayoutRoot/VisualRoot/RecordGap"
+    },
+    "recordGapLabel": {
+      "type": "Label",
+      "path": "SafeHud/GameplayHUDLayoutRoot/VisualRoot/RecordGap/RecordGapText"
+    },
+    "testModeBadgeLabel": {
+      "type": "Label",
+      "path": "SafeHud/TestModeBadge"
+    },
+    "perfectLabel": {
+      "type": "Label",
+      "path": "SafeHud/Perfect"
+    },
+    "perfectOpacity": {
+      "type": "UIOpacity",
+      "path": "SafeHud/Perfect"
+    },
+    "startGroup": {
+      "type": "Node",
+      "path": "SafeHud/HomeScreenLayoutRoot/VisualRoot"
+    },
+    "homePanelGraphics": {
+      "type": "StackUIVisual",
+      "path": "SafeHud/HomeScreenLayoutRoot/VisualRoot"
+    },
+    "settingsButton": {
+      "type": "Node",
+      "path": "SafeHud/HomeScreenLayoutRoot/VisualRoot/SettingsButton"
+    },
+    "settingsButtonGraphics": {
+      "type": "StackUIVisual",
+      "path": "SafeHud/HomeScreenLayoutRoot/VisualRoot/SettingsButton"
+    },
+    "settingsButtonLabel": {
+      "type": "Label",
+      "path": "SafeHud/HomeScreenLayoutRoot/VisualRoot/SettingsButton/SettingsButtonLabel"
+    },
+    "leaderboardButton": {
+      "type": "Node",
+      "path": "SafeHud/HomeScreenLayoutRoot/VisualRoot/LeaderboardButton"
+    },
+    "leaderboardButtonGraphics": {
+      "type": "StackUIVisual",
+      "path": "SafeHud/HomeScreenLayoutRoot/VisualRoot/LeaderboardButton"
+    },
+    "leaderboardButtonLabel": {
+      "type": "Label",
+      "path": "SafeHud/HomeScreenLayoutRoot/VisualRoot/LeaderboardButton/LeaderboardButtonLabel"
+    },
+    "homeCoinLabel": {
+      "type": "Label",
+      "path": "SafeHud/HomeScreenLayoutRoot/VisualRoot/HomeCoins"
+    },
+    "homeCoinCaption": {
+      "type": "Label",
+      "path": "SafeHud/HomeScreenLayoutRoot/VisualRoot/HomeCoinCaption"
+    },
+    "homeBestCaption": {
+      "type": "Label",
+      "path": "SafeHud/HomeScreenLayoutRoot/VisualRoot/HomeBestCaption"
+    },
+    "homeStaminaLabel": {
+      "type": "Label",
+      "path": "SafeHud/HomeScreenLayoutRoot/VisualRoot/HomeStamina"
+    },
+    "homeBestBadge": {
+      "type": "Node",
+      "path": "SafeHud/HomeScreenLayoutRoot/VisualRoot/HomeBestBadge"
+    },
+    "homeBestLabel": {
+      "type": "Label",
+      "path": "SafeHud/HomeScreenLayoutRoot/VisualRoot/HomeBest"
+    },
+    "startButton": {
+      "type": "Node",
+      "path": "SafeHud/HomeScreenLayoutRoot/VisualRoot/StartButton"
+    },
+    "startButtonGraphics": {
+      "type": "StackUIVisual",
+      "path": "SafeHud/HomeScreenLayoutRoot/VisualRoot/StartButton"
+    },
+    "startPromptLabel": {
+      "type": "Label",
+      "path": "SafeHud/HomeScreenLayoutRoot/VisualRoot/StartButton/StartButtonLabel"
+    },
+    "controlsLabel": {
+      "type": "Label",
+      "path": "SafeHud/HomeScreenLayoutRoot/VisualRoot/Controls"
+    },
+    "precisionTipLabel": {
+      "type": "Label",
+      "path": "SafeHud/HomeScreenLayoutRoot/VisualRoot/PrecisionTip"
+    },
+    "homeLeaderboardPreview": {
+      "type": "Node",
+      "path": "SafeHud/HomeScreenLayoutRoot/VisualRoot/HomeLeaderboardPreview"
+    },
+    "homeLeaderboardPreviewGraphics": {
+      "type": "StackUIVisual",
+      "path": "SafeHud/HomeScreenLayoutRoot/VisualRoot/HomeLeaderboardPreview"
+    },
+    "homeLeaderboardPreviewTitle": {
+      "type": "Label",
+      "path": "SafeHud/HomeScreenLayoutRoot/VisualRoot/HomeLeaderboardPreview/PreviewTitle"
+    },
+    "homeLeaderboardPreviewSubtitle": {
+      "type": "Label",
+      "path": "SafeHud/HomeScreenLayoutRoot/VisualRoot/HomeLeaderboardPreview/PreviewSubtitle"
+    },
+    "homeLeaderboardPreviewEmpty": {
+      "type": "Label",
+      "path": "SafeHud/HomeScreenLayoutRoot/VisualRoot/HomeLeaderboardPreview/PreviewEmpty"
+    },
+    "homeLeaderboardPreviewHint": {
+      "type": "Label",
+      "path": "SafeHud/HomeScreenLayoutRoot/VisualRoot/HomeLeaderboardPreview/PreviewHint"
+    },
+    "resultGroup": {
+      "type": "Node",
+      "path": "SafeHud/ResultScreenLayoutRoot/VisualRoot"
+    },
+    "resultPanelGraphics": {
+      "type": "StackUIVisual",
+      "path": "SafeHud/ResultScreenLayoutRoot/VisualRoot"
+    },
+    "resultTitleLabel": {
+      "type": "Label",
+      "path": "SafeHud/ResultScreenLayoutRoot/VisualRoot/ResultTitle"
+    },
+    "resultScoreLabel": {
+      "type": "Label",
+      "path": "SafeHud/ResultScreenLayoutRoot/VisualRoot/ResultScore"
+    },
+    "resultBestLabel": {
+      "type": "Label",
+      "path": "SafeHud/ResultScreenLayoutRoot/VisualRoot/ResultBest"
+    },
+    "resultCoinLabel": {
+      "type": "Label",
+      "path": "SafeHud/ResultScreenLayoutRoot/VisualRoot/ResultCoins"
+    },
+    "resultReviveButton": {
+      "type": "StackUIButtonBinding"
+    },
+    "resultRestartButton": {
+      "type": "StackUIButtonBinding"
+    },
+    "resultHomeButton": {
+      "type": "StackUIButtonBinding"
+    },
+    "pauseButton": {
+      "type": "Node",
+      "path": "SafeHud/PauseButton"
+    },
+    "pauseButtonGraphics": {
+      "type": "StackUIVisual",
+      "path": "SafeHud/PauseButton"
+    },
+    "pauseButtonLabel": {
+      "type": "Label",
+      "path": "SafeHud/PauseButton/PauseButtonLabel"
+    },
+    "pauseGroup": {
+      "type": "Node",
+      "path": "SafeHud/PauseScreenLayoutRoot/VisualRoot"
+    },
+    "pausePanelGraphics": {
+      "type": "StackUIVisual",
+      "path": "SafeHud/PauseScreenLayoutRoot/VisualRoot"
+    },
+    "resumeButton": {
+      "type": "Node",
+      "path": "SafeHud/PauseScreenLayoutRoot/VisualRoot/ResumeButton"
+    },
+    "resumeButtonGraphics": {
+      "type": "StackUIVisual",
+      "path": "SafeHud/PauseScreenLayoutRoot/VisualRoot/ResumeButton"
+    },
+    "resumeButtonLabel": {
+      "type": "Label",
+      "path": "SafeHud/PauseScreenLayoutRoot/VisualRoot/ResumeButton/ResumeButtonLabel"
+    },
+    "restartButton": {
+      "type": "Node",
+      "path": "SafeHud/PauseScreenLayoutRoot/VisualRoot/RestartButton"
+    },
+    "restartButtonGraphics": {
+      "type": "StackUIVisual",
+      "path": "SafeHud/PauseScreenLayoutRoot/VisualRoot/RestartButton"
+    },
+    "restartButtonLabel": {
+      "type": "Label",
+      "path": "SafeHud/PauseScreenLayoutRoot/VisualRoot/RestartButton/RestartButtonLabel"
+    },
+    "homeButton": {
+      "type": "Node",
+      "path": "SafeHud/PauseScreenLayoutRoot/VisualRoot/HomeButton"
+    },
+    "homeButtonGraphics": {
+      "type": "StackUIVisual",
+      "path": "SafeHud/PauseScreenLayoutRoot/VisualRoot/HomeButton"
+    },
+    "homeButtonLabel": {
+      "type": "Label",
+      "path": "SafeHud/PauseScreenLayoutRoot/VisualRoot/HomeButton/HomeButtonLabel"
+    },
+    "settingsGroup": {
+      "type": "Node",
+      "path": "SafeHud/SettingsScreenLayoutRoot/VisualRoot"
+    },
+    "settingsGraphics": {
+      "type": "StackUIVisual",
+      "path": "SafeHud/SettingsScreenLayoutRoot/VisualRoot"
+    },
+    "soundToggle": {
+      "type": "StackUIButtonBinding"
+    },
+    "motionToggle": {
+      "type": "StackUIButtonBinding"
+    },
+    "testModeToggle": {
+      "type": "Node",
+      "path": "SafeHud/SettingsScreenLayoutRoot/VisualRoot/TestModeToggle"
+    },
+    "testModeToggleGraphics": {
+      "type": "StackUIVisual",
+      "path": "SafeHud/SettingsScreenLayoutRoot/VisualRoot/TestModeToggle"
+    },
+    "testModeToggleLabel": {
+      "type": "Label",
+      "path": "SafeHud/SettingsScreenLayoutRoot/VisualRoot/TestModeToggle/TestModeToggleLabel"
+    },
+    "nicknameButton": {
+      "type": "StackUIButtonBinding"
+    },
+    "nicknameLabel": {
+      "type": "Label",
+      "path": "SafeHud/SettingsScreenLayoutRoot/VisualRoot/NicknameButton/CurrentNickname"
+    },
+    "restoreStaminaButton": {
+      "type": "StackUIButtonBinding"
+    },
+    "appearanceToggle": {
+      "type": "StackUIButtonBinding"
+    },
+    "settingsCloseButton": {
+      "type": "StackUIButtonBinding"
+    },
+    "nicknameGroup": {
+      "type": "Node",
+      "path": "SafeHud/NicknameDialogLayoutRoot/VisualRoot"
+    },
+    "nicknameGraphics": {
+      "type": "StackUIVisual",
+      "path": "SafeHud/NicknameDialogLayoutRoot/VisualRoot"
+    },
+    "nicknameInputGraphics": {
+      "type": "StackUIVisual",
+      "path": "SafeHud/NicknameDialogLayoutRoot/VisualRoot/NicknameInput"
+    },
+    "nicknameEditor": {
+      "type": "EditBox",
+      "path": "SafeHud/NicknameDialogLayoutRoot/VisualRoot/NicknameInput"
+    },
+    "nicknameHint": {
+      "type": "Label",
+      "path": "SafeHud/NicknameDialogLayoutRoot/VisualRoot/NicknameHint"
+    },
+    "nicknameSaveButton": {
+      "type": "StackUIButtonBinding"
+    },
+    "nicknameCancelButton": {
+      "type": "StackUIButtonBinding"
+    },
+    "leaderboardGroup": {
+      "type": "Node",
+      "path": "SafeHud/LeaderboardScreenLayoutRoot/VisualRoot"
+    },
+    "leaderboardGraphics": {
+      "type": "StackUIVisual",
+      "path": "SafeHud/LeaderboardScreenLayoutRoot/VisualRoot"
+    },
+    "leaderboardStatus": {
+      "type": "Label",
+      "path": "SafeHud/LeaderboardScreenLayoutRoot/VisualRoot/LeaderboardStatus"
+    },
+    "leaderboardViewport": {
+      "type": "Node",
+      "path": "SafeHud/LeaderboardScreenLayoutRoot/VisualRoot/LeaderboardViewport"
+    },
+    "leaderboardContent": {
+      "type": "Node",
+      "path": "SafeHud/LeaderboardScreenLayoutRoot/VisualRoot/LeaderboardViewport/LeaderboardContent"
+    },
+    "leaderboardScroll": {
+      "type": "ScrollView",
+      "path": "SafeHud/LeaderboardScreenLayoutRoot/VisualRoot/LeaderboardViewport"
+    },
+    "leaderboardScrollTrack": {
+      "type": "StackUIVisual",
+      "path": "SafeHud/LeaderboardScreenLayoutRoot/VisualRoot/LeaderboardScrollTrack"
+    },
+    "leaderboardEmpty": {
+      "type": "Label",
+      "path": "SafeHud/LeaderboardScreenLayoutRoot/VisualRoot/LeaderboardEmpty"
+    },
+    "leaderboardPageLabel": {
+      "type": "Label",
+      "path": "SafeHud/LeaderboardScreenLayoutRoot/VisualRoot/LeaderboardScrollHint"
+    },
+    "transitionBlocker": {
+      "type": "Node",
+      "path": "TransitionInputBlocker"
+    },
+    "reviveGroup": {
+      "type": "Node",
+      "path": "SafeHud/ReviveDialogLayoutRoot/VisualRoot"
+    },
+    "reviveQr": {
+      "type": "Sprite",
+      "path": "SafeHud/ReviveDialogLayoutRoot/VisualRoot/ReviveQR/QRCode"
+    },
+    "reviveStatusLabel": {
+      "type": "Label",
+      "path": "SafeHud/ReviveDialogLayoutRoot/VisualRoot/ReviveStatus"
+    },
+    "reviveCloseButton": {
+      "type": "StackUIButtonBinding"
+    },
+    "homeStatVisuals[0]": {
+      "type": "StackUIVisual",
+      "path": "SafeHud/HomeScreenLayoutRoot/VisualRoot/HomeBestBadge/HomeStatCard-0"
+    },
+    "homeStatVisuals[1]": {
+      "type": "StackUIVisual",
+      "path": "SafeHud/HomeScreenLayoutRoot/VisualRoot/HomeBestBadge/HomeStatCard-1"
+    },
+    "homeStatVisuals": {
+      "type": "StackUIVisual",
+      "array": true
+    },
+    "homePreviewRowVisuals[0]": {
+      "type": "StackUIVisual",
+      "path": "SafeHud/HomeScreenLayoutRoot/VisualRoot/HomeLeaderboardPreview/PreviewRowVisual-0"
+    },
+    "homePreviewRowVisuals[1]": {
+      "type": "StackUIVisual",
+      "path": "SafeHud/HomeScreenLayoutRoot/VisualRoot/HomeLeaderboardPreview/PreviewRowVisual-1"
+    },
+    "homePreviewRowVisuals[2]": {
+      "type": "StackUIVisual",
+      "path": "SafeHud/HomeScreenLayoutRoot/VisualRoot/HomeLeaderboardPreview/PreviewRowVisual-2"
+    },
+    "homePreviewRowVisuals": {
+      "type": "StackUIVisual",
+      "array": true
+    },
+    "homePreviewPodium[0]": {
+      "type": "Sprite",
+      "path": "SafeHud/HomeScreenLayoutRoot/VisualRoot/HomeLeaderboardPreview/PreviewPodium-0"
+    },
+    "homePreviewPodium[1]": {
+      "type": "Sprite",
+      "path": "SafeHud/HomeScreenLayoutRoot/VisualRoot/HomeLeaderboardPreview/PreviewPodium-1"
+    },
+    "homePreviewPodium[2]": {
+      "type": "Sprite",
+      "path": "SafeHud/HomeScreenLayoutRoot/VisualRoot/HomeLeaderboardPreview/PreviewPodium-2"
+    },
+    "homePreviewPodium": {
+      "type": "Sprite",
+      "array": true
+    },
+    "previewHintBackground": {
+      "type": "Sprite",
+      "path": "SafeHud/HomeScreenLayoutRoot/VisualRoot/HomeLeaderboardPreview/PreviewHintBackground"
+    },
+    "qrCodeView": {
+      "type": "QRCodeView",
+      "path": "SafeHud/ReviveDialogLayoutRoot/VisualRoot/ReviveQR/QRCode"
+    },
+    "reviveVisual": {
+      "type": "StackUIVisual",
+      "path": "SafeHud/ReviveDialogLayoutRoot/VisualRoot"
+    },
+    "settingStateLabels[0]": {
+      "type": "Label",
+      "path": "SafeHud/SettingsScreenLayoutRoot/VisualRoot/SoundToggle/SettingState"
+    },
+    "settingStateLabels[1]": {
+      "type": "Label",
+      "path": "SafeHud/SettingsScreenLayoutRoot/VisualRoot/MotionToggle/SettingState"
+    },
+    "settingStateLabels[2]": {
+      "type": "Label",
+      "path": "SafeHud/SettingsScreenLayoutRoot/VisualRoot/TestModeToggle/SettingState"
+    },
+    "settingStateLabels": {
+      "type": "Label",
+      "array": true
+    },
+    "gameplayFx": {
+      "type": "GameplayFxController",
+      "path": "GameplayFxRoot"
+    },
+    "pageLayoutRoots[0]": {
+      "type": "Node",
+      "path": "SafeHud/HomeScreenLayoutRoot"
+    },
+    "pageLayoutRoots[1]": {
+      "type": "Node",
+      "path": "SafeHud/GameplayHUDLayoutRoot"
+    },
+    "pageLayoutRoots[2]": {
+      "type": "Node",
+      "path": "SafeHud/SettingsScreenLayoutRoot"
+    },
+    "pageLayoutRoots[3]": {
+      "type": "Node",
+      "path": "SafeHud/NicknameDialogLayoutRoot"
+    },
+    "pageLayoutRoots[4]": {
+      "type": "Node",
+      "path": "SafeHud/LeaderboardScreenLayoutRoot"
+    },
+    "pageLayoutRoots[5]": {
+      "type": "Node",
+      "path": "SafeHud/PauseScreenLayoutRoot"
+    },
+    "pageLayoutRoots[6]": {
+      "type": "Node",
+      "path": "SafeHud/ResultScreenLayoutRoot"
+    },
+    "pageLayoutRoots[7]": {
+      "type": "Node",
+      "path": "SafeHud/ReviveDialogLayoutRoot"
+    },
+    "pageLayoutRoots": {
+      "type": "Node",
+      "array": true
+    },
+    "pageVisualRoots[0]": {
+      "type": "Node",
+      "path": "SafeHud/HomeScreenLayoutRoot/VisualRoot"
+    },
+    "pageVisualRoots[1]": {
+      "type": "Node",
+      "path": "SafeHud/GameplayHUDLayoutRoot/VisualRoot"
+    },
+    "pageVisualRoots[2]": {
+      "type": "Node",
+      "path": "SafeHud/SettingsScreenLayoutRoot/VisualRoot"
+    },
+    "pageVisualRoots[3]": {
+      "type": "Node",
+      "path": "SafeHud/NicknameDialogLayoutRoot/VisualRoot"
+    },
+    "pageVisualRoots[4]": {
+      "type": "Node",
+      "path": "SafeHud/LeaderboardScreenLayoutRoot/VisualRoot"
+    },
+    "pageVisualRoots[5]": {
+      "type": "Node",
+      "path": "SafeHud/PauseScreenLayoutRoot/VisualRoot"
+    },
+    "pageVisualRoots[6]": {
+      "type": "Node",
+      "path": "SafeHud/ResultScreenLayoutRoot/VisualRoot"
+    },
+    "pageVisualRoots[7]": {
+      "type": "Node",
+      "path": "SafeHud/ReviveDialogLayoutRoot/VisualRoot"
+    },
+    "pageVisualRoots": {
+      "type": "Node",
+      "array": true
+    },
+    "graphics": {
+      "type": "Node",
+      "path": "GameplayInput"
+    },
+    "homeStaminaIcon": {
+      "type": "Sprite",
+      "path": "HomeScreenLayoutRoot/VisualRoot/HomeStaminaIcon"
+    }
+  },
+  "structs": {
+    "StackUIButtonBinding": {
+      "node": "Node",
+      "graphics": "StackUIVisual",
+      "label": "Label"
+    },
+    "StackLeaderboardRowBinding": {
+      "node": "Node",
+      "graphics": "StackUIVisual",
+      "rank": "Label",
+      "player": "Label",
+      "score": "Label",
+      "title": "Label",
+      "detail": "Label"
+    }
+  },
+  "assets": {
+    "white": {
+      "uuid": "a74d6d87-b357-52db-a6ab-a4fd5cb08644",
+      "spriteFrame": "a74d6d87-b357-52db-a6ab-a4fd5cb08644@f9941",
+      "texture": "a74d6d87-b357-52db-a6ab-a4fd5cb08644@6c48a",
+      "width": 2,
+      "height": 2,
+      "border": 0,
+      "packable": true,
+      "path": "assets/ui/primitives/white.png"
+    },
+    "ring-white": {
+      "uuid": "f123a93e-e4b0-54a2-a008-c8ff94386fe2",
+      "spriteFrame": "f123a93e-e4b0-54a2-a008-c8ff94386fe2@f9941",
+      "texture": "f123a93e-e4b0-54a2-a008-c8ff94386fe2@6c48a",
+      "width": 2,
+      "height": 2,
+      "border": 0,
+      "packable": false,
+      "path": "assets/ui/primitives/ring-white.png"
+    },
+    "circle": {
+      "uuid": "76829a83-dccc-5bf4-a78e-fb5613c6d597",
+      "spriteFrame": "76829a83-dccc-5bf4-a78e-fb5613c6d597@f9941",
+      "texture": "76829a83-dccc-5bf4-a78e-fb5613c6d597@6c48a",
+      "width": 128,
+      "height": 128,
+      "border": 0,
+      "packable": true,
+      "path": "assets/ui/primitives/circle.png"
+    },
+    "arrow": {
+      "uuid": "25e7c9a3-d98d-5bf3-a1b8-3699ecae6355",
+      "spriteFrame": "25e7c9a3-d98d-5bf3-a1b8-3699ecae6355@f9941",
+      "texture": "25e7c9a3-d98d-5bf3-a1b8-3699ecae6355@6c48a",
+      "width": 13,
+      "height": 20,
+      "border": 0,
+      "packable": true,
+      "path": "assets/ui/primitives/arrow.png"
+    },
+    "fill-r12": {
+      "uuid": "7b08fb69-b0d6-5f7f-a8cd-17f453496530",
+      "spriteFrame": "7b08fb69-b0d6-5f7f-a8cd-17f453496530@f9941",
+      "texture": "7b08fb69-b0d6-5f7f-a8cd-17f453496530@6c48a",
+      "width": 32,
+      "height": 32,
+      "border": 12,
+      "packable": true,
+      "path": "assets/ui/primitives/fill-r12.png"
+    },
+    "border-r12-w1": {
+      "uuid": "1e682956-469c-5dbb-a20d-6fa7fb5c0f61",
+      "spriteFrame": "1e682956-469c-5dbb-a20d-6fa7fb5c0f61@f9941",
+      "texture": "1e682956-469c-5dbb-a20d-6fa7fb5c0f61@6c48a",
+      "width": 32,
+      "height": 32,
+      "border": 13,
+      "packable": true,
+      "path": "assets/ui/primitives/border-r12-w1.png"
+    },
+    "border-r12-w1.5": {
+      "uuid": "6f1824c2-0dfa-51ef-a745-3d94df498718",
+      "spriteFrame": "6f1824c2-0dfa-51ef-a745-3d94df498718@f9941",
+      "texture": "6f1824c2-0dfa-51ef-a745-3d94df498718@6c48a",
+      "width": 32,
+      "height": 32,
+      "border": 14,
+      "packable": true,
+      "path": "assets/ui/primitives/border-r12-w1.5.png"
+    },
+    "border-r12-w2": {
+      "uuid": "16823fe8-c0e6-59d4-a875-bae9589a19fc",
+      "spriteFrame": "16823fe8-c0e6-59d4-a875-bae9589a19fc@f9941",
+      "texture": "16823fe8-c0e6-59d4-a875-bae9589a19fc@6c48a",
+      "width": 32,
+      "height": 32,
+      "border": 14,
+      "packable": true,
+      "path": "assets/ui/primitives/border-r12-w2.png"
+    },
+    "border-r12-w3": {
+      "uuid": "6ef15655-5534-5d23-a54b-52af391dd8bf",
+      "spriteFrame": "6ef15655-5534-5d23-a54b-52af391dd8bf@f9941",
+      "texture": "6ef15655-5534-5d23-a54b-52af391dd8bf@6c48a",
+      "width": 32,
+      "height": 32,
+      "border": 15,
+      "packable": true,
+      "path": "assets/ui/primitives/border-r12-w3.png"
+    },
+    "border-r12-w4": {
+      "uuid": "bd2a8357-fdbf-5c64-a0c2-b5b9173927b0",
+      "spriteFrame": "bd2a8357-fdbf-5c64-a0c2-b5b9173927b0@f9941",
+      "texture": "bd2a8357-fdbf-5c64-a0c2-b5b9173927b0@6c48a",
+      "width": 32,
+      "height": 32,
+      "border": 16,
+      "packable": true,
+      "path": "assets/ui/primitives/border-r12-w4.png"
+    },
+    "fill-r16": {
+      "uuid": "bb8281c8-e604-5cf7-ae01-710e8b55c23b",
+      "spriteFrame": "bb8281c8-e604-5cf7-ae01-710e8b55c23b@f9941",
+      "texture": "bb8281c8-e604-5cf7-ae01-710e8b55c23b@6c48a",
+      "width": 40,
+      "height": 40,
+      "border": 16,
+      "packable": true,
+      "path": "assets/ui/primitives/fill-r16.png"
+    },
+    "border-r16-w1": {
+      "uuid": "169d0fba-25be-5242-a1b5-aa9df79fe69c",
+      "spriteFrame": "169d0fba-25be-5242-a1b5-aa9df79fe69c@f9941",
+      "texture": "169d0fba-25be-5242-a1b5-aa9df79fe69c@6c48a",
+      "width": 40,
+      "height": 40,
+      "border": 17,
+      "packable": true,
+      "path": "assets/ui/primitives/border-r16-w1.png"
+    },
+    "border-r16-w1.5": {
+      "uuid": "b3d2fdc6-b723-5d60-a656-62c1b80a3989",
+      "spriteFrame": "b3d2fdc6-b723-5d60-a656-62c1b80a3989@f9941",
+      "texture": "b3d2fdc6-b723-5d60-a656-62c1b80a3989@6c48a",
+      "width": 40,
+      "height": 40,
+      "border": 18,
+      "packable": true,
+      "path": "assets/ui/primitives/border-r16-w1.5.png"
+    },
+    "border-r16-w2": {
+      "uuid": "e9e9935b-3e7b-59cf-a76e-c15a0fea187a",
+      "spriteFrame": "e9e9935b-3e7b-59cf-a76e-c15a0fea187a@f9941",
+      "texture": "e9e9935b-3e7b-59cf-a76e-c15a0fea187a@6c48a",
+      "width": 40,
+      "height": 40,
+      "border": 18,
+      "packable": true,
+      "path": "assets/ui/primitives/border-r16-w2.png"
+    },
+    "border-r16-w3": {
+      "uuid": "b2d7a095-9804-5530-ac3b-e920f7798f78",
+      "spriteFrame": "b2d7a095-9804-5530-ac3b-e920f7798f78@f9941",
+      "texture": "b2d7a095-9804-5530-ac3b-e920f7798f78@6c48a",
+      "width": 40,
+      "height": 40,
+      "border": 19,
+      "packable": true,
+      "path": "assets/ui/primitives/border-r16-w3.png"
+    },
+    "border-r16-w4": {
+      "uuid": "6eb0fcb8-76b3-5e08-aa12-bae966b0f329",
+      "spriteFrame": "6eb0fcb8-76b3-5e08-aa12-bae966b0f329@f9941",
+      "texture": "6eb0fcb8-76b3-5e08-aa12-bae966b0f329@6c48a",
+      "width": 40,
+      "height": 40,
+      "border": 20,
+      "packable": true,
+      "path": "assets/ui/primitives/border-r16-w4.png"
+    },
+    "fill-r18": {
+      "uuid": "3eecdfa9-2db6-5317-a2c7-f194cf93686d",
+      "spriteFrame": "3eecdfa9-2db6-5317-a2c7-f194cf93686d@f9941",
+      "texture": "3eecdfa9-2db6-5317-a2c7-f194cf93686d@6c48a",
+      "width": 44,
+      "height": 44,
+      "border": 18,
+      "packable": true,
+      "path": "assets/ui/primitives/fill-r18.png"
+    },
+    "border-r18-w1": {
+      "uuid": "f4755dce-1faa-59eb-aa69-a4b3301e5c61",
+      "spriteFrame": "f4755dce-1faa-59eb-aa69-a4b3301e5c61@f9941",
+      "texture": "f4755dce-1faa-59eb-aa69-a4b3301e5c61@6c48a",
+      "width": 44,
+      "height": 44,
+      "border": 19,
+      "packable": true,
+      "path": "assets/ui/primitives/border-r18-w1.png"
+    },
+    "border-r18-w1.5": {
+      "uuid": "3f39ef41-9016-55da-ab31-c576d774fa73",
+      "spriteFrame": "3f39ef41-9016-55da-ab31-c576d774fa73@f9941",
+      "texture": "3f39ef41-9016-55da-ab31-c576d774fa73@6c48a",
+      "width": 44,
+      "height": 44,
+      "border": 20,
+      "packable": true,
+      "path": "assets/ui/primitives/border-r18-w1.5.png"
+    },
+    "border-r18-w2": {
+      "uuid": "76275279-bd0a-5a6a-ac44-0d74daa35ecf",
+      "spriteFrame": "76275279-bd0a-5a6a-ac44-0d74daa35ecf@f9941",
+      "texture": "76275279-bd0a-5a6a-ac44-0d74daa35ecf@6c48a",
+      "width": 44,
+      "height": 44,
+      "border": 20,
+      "packable": true,
+      "path": "assets/ui/primitives/border-r18-w2.png"
+    },
+    "border-r18-w3": {
+      "uuid": "bb20aa17-8b48-52b4-a0d4-bf86790ca2e9",
+      "spriteFrame": "bb20aa17-8b48-52b4-a0d4-bf86790ca2e9@f9941",
+      "texture": "bb20aa17-8b48-52b4-a0d4-bf86790ca2e9@6c48a",
+      "width": 44,
+      "height": 44,
+      "border": 21,
+      "packable": true,
+      "path": "assets/ui/primitives/border-r18-w3.png"
+    },
+    "border-r18-w4": {
+      "uuid": "6f384540-4d13-513f-aa50-a1aeb5498936",
+      "spriteFrame": "6f384540-4d13-513f-aa50-a1aeb5498936@f9941",
+      "texture": "6f384540-4d13-513f-aa50-a1aeb5498936@6c48a",
+      "width": 44,
+      "height": 44,
+      "border": 22,
+      "packable": true,
+      "path": "assets/ui/primitives/border-r18-w4.png"
+    },
+    "fill-r20": {
+      "uuid": "dba3c0ec-7079-54d8-ae47-a944ac709bb5",
+      "spriteFrame": "dba3c0ec-7079-54d8-ae47-a944ac709bb5@f9941",
+      "texture": "dba3c0ec-7079-54d8-ae47-a944ac709bb5@6c48a",
+      "width": 48,
+      "height": 48,
+      "border": 20,
+      "packable": true,
+      "path": "assets/ui/primitives/fill-r20.png"
+    },
+    "border-r20-w1": {
+      "uuid": "26e332f5-ca9f-5c4d-a2ca-2c609a3fd5b2",
+      "spriteFrame": "26e332f5-ca9f-5c4d-a2ca-2c609a3fd5b2@f9941",
+      "texture": "26e332f5-ca9f-5c4d-a2ca-2c609a3fd5b2@6c48a",
+      "width": 48,
+      "height": 48,
+      "border": 21,
+      "packable": true,
+      "path": "assets/ui/primitives/border-r20-w1.png"
+    },
+    "border-r20-w1.5": {
+      "uuid": "5584e99c-a4ea-5359-ad7e-48a19a3b8669",
+      "spriteFrame": "5584e99c-a4ea-5359-ad7e-48a19a3b8669@f9941",
+      "texture": "5584e99c-a4ea-5359-ad7e-48a19a3b8669@6c48a",
+      "width": 48,
+      "height": 48,
+      "border": 22,
+      "packable": true,
+      "path": "assets/ui/primitives/border-r20-w1.5.png"
+    },
+    "border-r20-w2": {
+      "uuid": "ab7aa361-0a32-5e76-a522-a9aa408ced1c",
+      "spriteFrame": "ab7aa361-0a32-5e76-a522-a9aa408ced1c@f9941",
+      "texture": "ab7aa361-0a32-5e76-a522-a9aa408ced1c@6c48a",
+      "width": 48,
+      "height": 48,
+      "border": 22,
+      "packable": true,
+      "path": "assets/ui/primitives/border-r20-w2.png"
+    },
+    "border-r20-w3": {
+      "uuid": "6eca77de-13b1-55c0-a137-070dd5bd4477",
+      "spriteFrame": "6eca77de-13b1-55c0-a137-070dd5bd4477@f9941",
+      "texture": "6eca77de-13b1-55c0-a137-070dd5bd4477@6c48a",
+      "width": 48,
+      "height": 48,
+      "border": 23,
+      "packable": true,
+      "path": "assets/ui/primitives/border-r20-w3.png"
+    },
+    "border-r20-w4": {
+      "uuid": "81b24a51-f4a3-53ac-a435-13fff9dde13b",
+      "spriteFrame": "81b24a51-f4a3-53ac-a435-13fff9dde13b@f9941",
+      "texture": "81b24a51-f4a3-53ac-a435-13fff9dde13b@6c48a",
+      "width": 48,
+      "height": 48,
+      "border": 24,
+      "packable": true,
+      "path": "assets/ui/primitives/border-r20-w4.png"
+    },
+    "fill-r22": {
+      "uuid": "b639cd52-9ccc-5f47-a259-3787ee6730c5",
+      "spriteFrame": "b639cd52-9ccc-5f47-a259-3787ee6730c5@f9941",
+      "texture": "b639cd52-9ccc-5f47-a259-3787ee6730c5@6c48a",
+      "width": 52,
+      "height": 52,
+      "border": 22,
+      "packable": true,
+      "path": "assets/ui/primitives/fill-r22.png"
+    },
+    "border-r22-w1": {
+      "uuid": "636d7288-94db-586e-aac4-ab8a98ecb673",
+      "spriteFrame": "636d7288-94db-586e-aac4-ab8a98ecb673@f9941",
+      "texture": "636d7288-94db-586e-aac4-ab8a98ecb673@6c48a",
+      "width": 52,
+      "height": 52,
+      "border": 23,
+      "packable": true,
+      "path": "assets/ui/primitives/border-r22-w1.png"
+    },
+    "border-r22-w1.5": {
+      "uuid": "54afc58d-fc0b-5550-acc7-2b65db484d77",
+      "spriteFrame": "54afc58d-fc0b-5550-acc7-2b65db484d77@f9941",
+      "texture": "54afc58d-fc0b-5550-acc7-2b65db484d77@6c48a",
+      "width": 52,
+      "height": 52,
+      "border": 24,
+      "packable": true,
+      "path": "assets/ui/primitives/border-r22-w1.5.png"
+    },
+    "border-r22-w2": {
+      "uuid": "a582f3f6-a828-59b0-a21c-b398673998e2",
+      "spriteFrame": "a582f3f6-a828-59b0-a21c-b398673998e2@f9941",
+      "texture": "a582f3f6-a828-59b0-a21c-b398673998e2@6c48a",
+      "width": 52,
+      "height": 52,
+      "border": 24,
+      "packable": true,
+      "path": "assets/ui/primitives/border-r22-w2.png"
+    },
+    "border-r22-w3": {
+      "uuid": "f3cab5c7-9dd5-5622-a921-d946774f11c5",
+      "spriteFrame": "f3cab5c7-9dd5-5622-a921-d946774f11c5@f9941",
+      "texture": "f3cab5c7-9dd5-5622-a921-d946774f11c5@6c48a",
+      "width": 52,
+      "height": 52,
+      "border": 25,
+      "packable": true,
+      "path": "assets/ui/primitives/border-r22-w3.png"
+    },
+    "border-r22-w4": {
+      "uuid": "851ef533-0a8a-5e3d-ac36-51e185011228",
+      "spriteFrame": "851ef533-0a8a-5e3d-ac36-51e185011228@f9941",
+      "texture": "851ef533-0a8a-5e3d-ac36-51e185011228@6c48a",
+      "width": 52,
+      "height": 52,
+      "border": 26,
+      "packable": true,
+      "path": "assets/ui/primitives/border-r22-w4.png"
+    },
+    "fill-r24": {
+      "uuid": "5a30ba4b-7496-515f-a7de-a5df62c902ba",
+      "spriteFrame": "5a30ba4b-7496-515f-a7de-a5df62c902ba@f9941",
+      "texture": "5a30ba4b-7496-515f-a7de-a5df62c902ba@6c48a",
+      "width": 56,
+      "height": 56,
+      "border": 24,
+      "packable": true,
+      "path": "assets/ui/primitives/fill-r24.png"
+    },
+    "border-r24-w1": {
+      "uuid": "0411b8d0-21d7-5069-a44e-8621f2c362c4",
+      "spriteFrame": "0411b8d0-21d7-5069-a44e-8621f2c362c4@f9941",
+      "texture": "0411b8d0-21d7-5069-a44e-8621f2c362c4@6c48a",
+      "width": 56,
+      "height": 56,
+      "border": 25,
+      "packable": true,
+      "path": "assets/ui/primitives/border-r24-w1.png"
+    },
+    "border-r24-w1.5": {
+      "uuid": "2df55188-2bb4-563e-a78c-7fd9929885a1",
+      "spriteFrame": "2df55188-2bb4-563e-a78c-7fd9929885a1@f9941",
+      "texture": "2df55188-2bb4-563e-a78c-7fd9929885a1@6c48a",
+      "width": 56,
+      "height": 56,
+      "border": 26,
+      "packable": true,
+      "path": "assets/ui/primitives/border-r24-w1.5.png"
+    },
+    "border-r24-w2": {
+      "uuid": "62b4e658-26fc-5599-a86c-703bff1bb564",
+      "spriteFrame": "62b4e658-26fc-5599-a86c-703bff1bb564@f9941",
+      "texture": "62b4e658-26fc-5599-a86c-703bff1bb564@6c48a",
+      "width": 56,
+      "height": 56,
+      "border": 26,
+      "packable": true,
+      "path": "assets/ui/primitives/border-r24-w2.png"
+    },
+    "border-r24-w3": {
+      "uuid": "aae96ae2-b1f1-519c-acf5-6ba008866e26",
+      "spriteFrame": "aae96ae2-b1f1-519c-acf5-6ba008866e26@f9941",
+      "texture": "aae96ae2-b1f1-519c-acf5-6ba008866e26@6c48a",
+      "width": 56,
+      "height": 56,
+      "border": 27,
+      "packable": true,
+      "path": "assets/ui/primitives/border-r24-w3.png"
+    },
+    "border-r24-w4": {
+      "uuid": "928ccff5-e9bb-5361-a64e-afe7ca923b3c",
+      "spriteFrame": "928ccff5-e9bb-5361-a64e-afe7ca923b3c@f9941",
+      "texture": "928ccff5-e9bb-5361-a64e-afe7ca923b3c@6c48a",
+      "width": 56,
+      "height": 56,
+      "border": 28,
+      "packable": true,
+      "path": "assets/ui/primitives/border-r24-w4.png"
+    },
+    "fill-r28": {
+      "uuid": "0a917c48-3b01-521e-a528-c2f918a146e2",
+      "spriteFrame": "0a917c48-3b01-521e-a528-c2f918a146e2@f9941",
+      "texture": "0a917c48-3b01-521e-a528-c2f918a146e2@6c48a",
+      "width": 64,
+      "height": 64,
+      "border": 28,
+      "packable": true,
+      "path": "assets/ui/primitives/fill-r28.png"
+    },
+    "border-r28-w1": {
+      "uuid": "614be8f4-c4dd-5737-a4ba-5e5dc618dd4c",
+      "spriteFrame": "614be8f4-c4dd-5737-a4ba-5e5dc618dd4c@f9941",
+      "texture": "614be8f4-c4dd-5737-a4ba-5e5dc618dd4c@6c48a",
+      "width": 64,
+      "height": 64,
+      "border": 29,
+      "packable": true,
+      "path": "assets/ui/primitives/border-r28-w1.png"
+    },
+    "border-r28-w1.5": {
+      "uuid": "50231191-5d84-5a45-a45a-692d711ffd44",
+      "spriteFrame": "50231191-5d84-5a45-a45a-692d711ffd44@f9941",
+      "texture": "50231191-5d84-5a45-a45a-692d711ffd44@6c48a",
+      "width": 64,
+      "height": 64,
+      "border": 30,
+      "packable": true,
+      "path": "assets/ui/primitives/border-r28-w1.5.png"
+    },
+    "border-r28-w2": {
+      "uuid": "ec0a11e2-06c1-58c5-abe5-7d3c97e94c59",
+      "spriteFrame": "ec0a11e2-06c1-58c5-abe5-7d3c97e94c59@f9941",
+      "texture": "ec0a11e2-06c1-58c5-abe5-7d3c97e94c59@6c48a",
+      "width": 64,
+      "height": 64,
+      "border": 30,
+      "packable": true,
+      "path": "assets/ui/primitives/border-r28-w2.png"
+    },
+    "border-r28-w3": {
+      "uuid": "ce122c26-690f-5e62-ae52-8e0f39fd1db5",
+      "spriteFrame": "ce122c26-690f-5e62-ae52-8e0f39fd1db5@f9941",
+      "texture": "ce122c26-690f-5e62-ae52-8e0f39fd1db5@6c48a",
+      "width": 64,
+      "height": 64,
+      "border": 31,
+      "packable": true,
+      "path": "assets/ui/primitives/border-r28-w3.png"
+    },
+    "border-r28-w4": {
+      "uuid": "2416bbc1-a93b-5515-a5b0-c9d8e6e955fb",
+      "spriteFrame": "2416bbc1-a93b-5515-a5b0-c9d8e6e955fb@f9941",
+      "texture": "2416bbc1-a93b-5515-a5b0-c9d8e6e955fb@6c48a",
+      "width": 64,
+      "height": 64,
+      "border": 32,
+      "packable": true,
+      "path": "assets/ui/primitives/border-r28-w4.png"
+    },
+    "fill-r36": {
+      "uuid": "41f6a84f-b201-5645-a8e5-66d8219857ae",
+      "spriteFrame": "41f6a84f-b201-5645-a8e5-66d8219857ae@f9941",
+      "texture": "41f6a84f-b201-5645-a8e5-66d8219857ae@6c48a",
+      "width": 80,
+      "height": 80,
+      "border": 36,
+      "packable": true,
+      "path": "assets/ui/primitives/fill-r36.png"
+    },
+    "border-r36-w1": {
+      "uuid": "4f389dd7-d4d1-59cd-aa44-48d2f89d7ba7",
+      "spriteFrame": "4f389dd7-d4d1-59cd-aa44-48d2f89d7ba7@f9941",
+      "texture": "4f389dd7-d4d1-59cd-aa44-48d2f89d7ba7@6c48a",
+      "width": 80,
+      "height": 80,
+      "border": 37,
+      "packable": true,
+      "path": "assets/ui/primitives/border-r36-w1.png"
+    },
+    "border-r36-w1.5": {
+      "uuid": "3d78545a-2978-5015-a645-7562ca6eea8e",
+      "spriteFrame": "3d78545a-2978-5015-a645-7562ca6eea8e@f9941",
+      "texture": "3d78545a-2978-5015-a645-7562ca6eea8e@6c48a",
+      "width": 80,
+      "height": 80,
+      "border": 38,
+      "packable": true,
+      "path": "assets/ui/primitives/border-r36-w1.5.png"
+    },
+    "border-r36-w2": {
+      "uuid": "5dceb069-c7ff-5f57-ae4b-5362fa661794",
+      "spriteFrame": "5dceb069-c7ff-5f57-ae4b-5362fa661794@f9941",
+      "texture": "5dceb069-c7ff-5f57-ae4b-5362fa661794@6c48a",
+      "width": 80,
+      "height": 80,
+      "border": 38,
+      "packable": true,
+      "path": "assets/ui/primitives/border-r36-w2.png"
+    },
+    "border-r36-w3": {
+      "uuid": "f1abbd92-2bc9-5029-a1bd-d654fb4bf13e",
+      "spriteFrame": "f1abbd92-2bc9-5029-a1bd-d654fb4bf13e@f9941",
+      "texture": "f1abbd92-2bc9-5029-a1bd-d654fb4bf13e@6c48a",
+      "width": 80,
+      "height": 80,
+      "border": 39,
+      "packable": true,
+      "path": "assets/ui/primitives/border-r36-w3.png"
+    },
+    "border-r36-w4": {
+      "uuid": "57b67154-1cd1-50eb-af7a-38c013897808",
+      "spriteFrame": "57b67154-1cd1-50eb-af7a-38c013897808@f9941",
+      "texture": "57b67154-1cd1-50eb-af7a-38c013897808@6c48a",
+      "width": 80,
+      "height": 80,
+      "border": 40,
+      "packable": true,
+      "path": "assets/ui/primitives/border-r36-w4.png"
+    },
+    "fill-r40": {
+      "uuid": "8ccb11d6-429a-5958-a7f7-373bc1326179",
+      "spriteFrame": "8ccb11d6-429a-5958-a7f7-373bc1326179@f9941",
+      "texture": "8ccb11d6-429a-5958-a7f7-373bc1326179@6c48a",
+      "width": 88,
+      "height": 88,
+      "border": 40,
+      "packable": true,
+      "path": "assets/ui/primitives/fill-r40.png"
+    },
+    "border-r40-w1": {
+      "uuid": "bd7f185c-b62f-5c9e-a0a2-4df944b72e72",
+      "spriteFrame": "bd7f185c-b62f-5c9e-a0a2-4df944b72e72@f9941",
+      "texture": "bd7f185c-b62f-5c9e-a0a2-4df944b72e72@6c48a",
+      "width": 88,
+      "height": 88,
+      "border": 41,
+      "packable": true,
+      "path": "assets/ui/primitives/border-r40-w1.png"
+    },
+    "border-r40-w1.5": {
+      "uuid": "a77552ae-6e1b-517d-ae11-db3c2c3d1ee2",
+      "spriteFrame": "a77552ae-6e1b-517d-ae11-db3c2c3d1ee2@f9941",
+      "texture": "a77552ae-6e1b-517d-ae11-db3c2c3d1ee2@6c48a",
+      "width": 88,
+      "height": 88,
+      "border": 42,
+      "packable": true,
+      "path": "assets/ui/primitives/border-r40-w1.5.png"
+    },
+    "border-r40-w2": {
+      "uuid": "8f363a50-27b4-5a2d-a850-9b97f3a85cc3",
+      "spriteFrame": "8f363a50-27b4-5a2d-a850-9b97f3a85cc3@f9941",
+      "texture": "8f363a50-27b4-5a2d-a850-9b97f3a85cc3@6c48a",
+      "width": 88,
+      "height": 88,
+      "border": 42,
+      "packable": true,
+      "path": "assets/ui/primitives/border-r40-w2.png"
+    },
+    "border-r40-w3": {
+      "uuid": "9de36c30-848f-52a6-a28e-13266b31fa86",
+      "spriteFrame": "9de36c30-848f-52a6-a28e-13266b31fa86@f9941",
+      "texture": "9de36c30-848f-52a6-a28e-13266b31fa86@6c48a",
+      "width": 88,
+      "height": 88,
+      "border": 43,
+      "packable": true,
+      "path": "assets/ui/primitives/border-r40-w3.png"
+    },
+    "border-r40-w4": {
+      "uuid": "3354bbb0-febc-5a04-ac76-34921c595c9e",
+      "spriteFrame": "3354bbb0-febc-5a04-ac76-34921c595c9e@f9941",
+      "texture": "3354bbb0-febc-5a04-ac76-34921c595c9e@6c48a",
+      "width": 88,
+      "height": 88,
+      "border": 44,
+      "packable": true,
+      "path": "assets/ui/primitives/border-r40-w4.png"
+    },
+    "fill-r42": {
+      "uuid": "77253e06-6a06-5bbd-a3e9-81105175b9bb",
+      "spriteFrame": "77253e06-6a06-5bbd-a3e9-81105175b9bb@f9941",
+      "texture": "77253e06-6a06-5bbd-a3e9-81105175b9bb@6c48a",
+      "width": 92,
+      "height": 92,
+      "border": 42,
+      "packable": true,
+      "path": "assets/ui/primitives/fill-r42.png"
+    },
+    "border-r42-w1": {
+      "uuid": "eef04848-ee11-5392-a598-5244a9578625",
+      "spriteFrame": "eef04848-ee11-5392-a598-5244a9578625@f9941",
+      "texture": "eef04848-ee11-5392-a598-5244a9578625@6c48a",
+      "width": 92,
+      "height": 92,
+      "border": 43,
+      "packable": true,
+      "path": "assets/ui/primitives/border-r42-w1.png"
+    },
+    "border-r42-w1.5": {
+      "uuid": "da65336a-7049-523d-a908-693a3a6f080b",
+      "spriteFrame": "da65336a-7049-523d-a908-693a3a6f080b@f9941",
+      "texture": "da65336a-7049-523d-a908-693a3a6f080b@6c48a",
+      "width": 92,
+      "height": 92,
+      "border": 44,
+      "packable": true,
+      "path": "assets/ui/primitives/border-r42-w1.5.png"
+    },
+    "border-r42-w2": {
+      "uuid": "1fc556e4-6c67-552a-a1a7-9158e01c5dc9",
+      "spriteFrame": "1fc556e4-6c67-552a-a1a7-9158e01c5dc9@f9941",
+      "texture": "1fc556e4-6c67-552a-a1a7-9158e01c5dc9@6c48a",
+      "width": 92,
+      "height": 92,
+      "border": 44,
+      "packable": true,
+      "path": "assets/ui/primitives/border-r42-w2.png"
+    },
+    "border-r42-w3": {
+      "uuid": "7051bac2-ef1c-589e-ae62-a6daba1eec97",
+      "spriteFrame": "7051bac2-ef1c-589e-ae62-a6daba1eec97@f9941",
+      "texture": "7051bac2-ef1c-589e-ae62-a6daba1eec97@6c48a",
+      "width": 92,
+      "height": 92,
+      "border": 45,
+      "packable": true,
+      "path": "assets/ui/primitives/border-r42-w3.png"
+    },
+    "border-r42-w4": {
+      "uuid": "87497eb3-3e18-52af-a662-a15215ab16aa",
+      "spriteFrame": "87497eb3-3e18-52af-a662-a15215ab16aa@f9941",
+      "texture": "87497eb3-3e18-52af-a662-a15215ab16aa@6c48a",
+      "width": 92,
+      "height": 92,
+      "border": 46,
+      "packable": true,
+      "path": "assets/ui/primitives/border-r42-w4.png"
+    },
+    "fill-r44": {
+      "uuid": "8f9d547c-3406-575d-ab86-18c89738e2bf",
+      "spriteFrame": "8f9d547c-3406-575d-ab86-18c89738e2bf@f9941",
+      "texture": "8f9d547c-3406-575d-ab86-18c89738e2bf@6c48a",
+      "width": 96,
+      "height": 96,
+      "border": 44,
+      "packable": true,
+      "path": "assets/ui/primitives/fill-r44.png"
+    },
+    "border-r44-w1": {
+      "uuid": "0b8a3c60-212d-55a7-a10d-7216bd0e3685",
+      "spriteFrame": "0b8a3c60-212d-55a7-a10d-7216bd0e3685@f9941",
+      "texture": "0b8a3c60-212d-55a7-a10d-7216bd0e3685@6c48a",
+      "width": 96,
+      "height": 96,
+      "border": 45,
+      "packable": true,
+      "path": "assets/ui/primitives/border-r44-w1.png"
+    },
+    "border-r44-w1.5": {
+      "uuid": "2b82619f-b931-54d3-ac40-d3b23b106121",
+      "spriteFrame": "2b82619f-b931-54d3-ac40-d3b23b106121@f9941",
+      "texture": "2b82619f-b931-54d3-ac40-d3b23b106121@6c48a",
+      "width": 96,
+      "height": 96,
+      "border": 46,
+      "packable": true,
+      "path": "assets/ui/primitives/border-r44-w1.5.png"
+    },
+    "border-r44-w2": {
+      "uuid": "666ce675-c345-5baf-aeb7-61d078ad19d3",
+      "spriteFrame": "666ce675-c345-5baf-aeb7-61d078ad19d3@f9941",
+      "texture": "666ce675-c345-5baf-aeb7-61d078ad19d3@6c48a",
+      "width": 96,
+      "height": 96,
+      "border": 46,
+      "packable": true,
+      "path": "assets/ui/primitives/border-r44-w2.png"
+    },
+    "border-r44-w3": {
+      "uuid": "1a49f54a-490b-5bc3-a1a7-06da1dc3f171",
+      "spriteFrame": "1a49f54a-490b-5bc3-a1a7-06da1dc3f171@f9941",
+      "texture": "1a49f54a-490b-5bc3-a1a7-06da1dc3f171@6c48a",
+      "width": 96,
+      "height": 96,
+      "border": 47,
+      "packable": true,
+      "path": "assets/ui/primitives/border-r44-w3.png"
+    },
+    "border-r44-w4": {
+      "uuid": "581c194a-528d-5f54-aecd-d01b33e576e4",
+      "spriteFrame": "581c194a-528d-5f54-aecd-d01b33e576e4@f9941",
+      "texture": "581c194a-528d-5f54-aecd-d01b33e576e4@6c48a",
+      "width": 96,
+      "height": 96,
+      "border": 48,
+      "packable": true,
+      "path": "assets/ui/primitives/border-r44-w4.png"
+    },
+    "fill-r2": {
+      "uuid": "55df5c9c-2f0d-5628-a7dd-8608e13673b2",
+      "spriteFrame": "55df5c9c-2f0d-5628-a7dd-8608e13673b2@f9941",
+      "texture": "55df5c9c-2f0d-5628-a7dd-8608e13673b2@6c48a",
+      "width": 12,
+      "height": 12,
+      "border": 2,
+      "packable": true,
+      "path": "assets/ui/primitives/fill-r2.png"
+    },
+    "fill-r5": {
+      "uuid": "556570f1-706d-5fcd-aedf-af9beda21406",
+      "spriteFrame": "556570f1-706d-5fcd-aedf-af9beda21406@f9941",
+      "texture": "556570f1-706d-5fcd-aedf-af9beda21406@6c48a",
+      "width": 18,
+      "height": 18,
+      "border": 5,
+      "packable": true,
+      "path": "assets/ui/primitives/fill-r5.png"
+    },
+    "fill-r10": {
+      "uuid": "ad5bb7f1-14ce-5cec-a57c-9324c0469161",
+      "spriteFrame": "ad5bb7f1-14ce-5cec-a57c-9324c0469161@f9941",
+      "texture": "ad5bb7f1-14ce-5cec-a57c-9324c0469161@6c48a",
+      "width": 28,
+      "height": 28,
+      "border": 10,
+      "packable": true,
+      "path": "assets/ui/primitives/fill-r10.png"
+    },
+    "fill-r51": {
+      "uuid": "13e1ebdb-863b-5f97-a67e-41b7d79aa5cd",
+      "spriteFrame": "13e1ebdb-863b-5f97-a67e-41b7d79aa5cd@f9941",
+      "texture": "13e1ebdb-863b-5f97-a67e-41b7d79aa5cd@6c48a",
+      "width": 110,
+      "height": 110,
+      "border": 51,
+      "packable": true,
+      "path": "assets/ui/primitives/fill-r51.png"
+    },
+    "fill-r58": {
+      "uuid": "5cb8e4a9-7870-5391-aed8-2fe4428665b9",
+      "spriteFrame": "5cb8e4a9-7870-5391-aed8-2fe4428665b9@f9941",
+      "texture": "5cb8e4a9-7870-5391-aed8-2fe4428665b9@6c48a",
+      "width": 124,
+      "height": 124,
+      "border": 58,
+      "packable": true,
+      "path": "assets/ui/primitives/fill-r58.png"
+    },
+    "row-gradient-normal": {
+      "uuid": "18163187-7e37-5515-a2a7-60af3de3cca3",
+      "spriteFrame": "18163187-7e37-5515-a2a7-60af3de3cca3@f9941",
+      "texture": "18163187-7e37-5515-a2a7-60af3de3cca3@6c48a",
+      "width": 160,
+      "height": 144,
+      "border": 18,
+      "packable": true,
+      "path": "assets/ui/primitives/row-gradient-normal.png"
+    },
+    "row-gradient-current": {
+      "uuid": "8d0f2ca9-6163-55e0-a125-7a4d726c627f",
+      "spriteFrame": "8d0f2ca9-6163-55e0-a125-7a4d726c627f@f9941",
+      "texture": "8d0f2ca9-6163-55e0-a125-7a4d726c627f@6c48a",
+      "width": 160,
+      "height": 144,
+      "border": 18,
+      "packable": true,
+      "path": "assets/ui/primitives/row-gradient-current.png"
+    },
+    "avatar-0": {
+      "uuid": "3dad26c5-71cc-508c-ac6e-fa0be797c008",
+      "spriteFrame": "3dad26c5-71cc-508c-ac6e-fa0be797c008@f9941",
+      "texture": "3dad26c5-71cc-508c-ac6e-fa0be797c008@6c48a",
+      "width": 128,
+      "height": 128,
+      "border": 0,
+      "packable": true,
+      "path": "assets/ui/primitives/avatar-0.png"
+    },
+    "avatar-1": {
+      "uuid": "d25eb8b8-5cf8-5e5f-a7f6-fe6d789f20f8",
+      "spriteFrame": "d25eb8b8-5cf8-5e5f-a7f6-fe6d789f20f8@f9941",
+      "texture": "d25eb8b8-5cf8-5e5f-a7f6-fe6d789f20f8@6c48a",
+      "width": 128,
+      "height": 128,
+      "border": 0,
+      "packable": true,
+      "path": "assets/ui/primitives/avatar-1.png"
+    },
+    "avatar-2": {
+      "uuid": "314852b2-6e4b-55d7-ac33-13778ccbbc02",
+      "spriteFrame": "314852b2-6e4b-55d7-ac33-13778ccbbc02@f9941",
+      "texture": "314852b2-6e4b-55d7-ac33-13778ccbbc02@6c48a",
+      "width": 128,
+      "height": 128,
+      "border": 0,
+      "packable": true,
+      "path": "assets/ui/primitives/avatar-2.png"
+    },
+    "avatar-3": {
+      "uuid": "5fddaafd-fce5-5ea7-ac5a-516a3aa8b87a",
+      "spriteFrame": "5fddaafd-fce5-5ea7-ac5a-516a3aa8b87a@f9941",
+      "texture": "5fddaafd-fce5-5ea7-ac5a-516a3aa8b87a@6c48a",
+      "width": 128,
+      "height": 128,
+      "border": 0,
+      "packable": true,
+      "path": "assets/ui/primitives/avatar-3.png"
+    },
+    "avatar-4": {
+      "uuid": "59a800c9-a67d-5a27-ac66-792733dd30a4",
+      "spriteFrame": "59a800c9-a67d-5a27-ac66-792733dd30a4@f9941",
+      "texture": "59a800c9-a67d-5a27-ac66-792733dd30a4@6c48a",
+      "width": 128,
+      "height": 128,
+      "border": 0,
+      "packable": true,
+      "path": "assets/ui/primitives/avatar-4.png"
+    },
+    "avatar-5": {
+      "uuid": "e38fce36-8c11-5b9d-a74f-5c20c038b491",
+      "spriteFrame": "e38fce36-8c11-5b9d-a74f-5c20c038b491@f9941",
+      "texture": "e38fce36-8c11-5b9d-a74f-5c20c038b491@6c48a",
+      "width": 128,
+      "height": 128,
+      "border": 0,
+      "packable": true,
+      "path": "assets/ui/primitives/avatar-5.png"
+    },
+    "energy-bolt": {
+      "uuid": "da07e78a-0e4c-501f-afcd-2be1e4550ea3",
+      "spriteFrame": "da07e78a-0e4c-501f-afcd-2be1e4550ea3@f9941",
+      "texture": "da07e78a-0e4c-501f-afcd-2be1e4550ea3@6c48a",
+      "width": 128,
+      "height": 128,
+      "border": 0,
+      "packable": true,
+      "path": "assets/ui/primitives/energy-bolt.png"
+    }
+  },
+  "visualSlots": [
+    "shadowSoft",
+    "shadowMid",
+    "shadow",
+    "fill",
+    "border",
+    "focus",
+    "arrow",
+    "avatar",
+    "badge",
+    "accent",
+    "detail",
+    "innerBorder"
+  ],
+  "radii": [
+    12,
+    16,
+    18,
+    20,
+    22,
+    24,
+    28,
+    36,
+    40,
+    42,
+    44
+  ],
+  "prefabs": {
+    "ImpactRing": {
+      "uuid": "65d7ab04-036b-5c49-a96e-c6334a250565",
+      "path": "assets/prefabs/ui/ImpactRing.prefab",
+      "nodeCount": 1,
+      "componentCount": 2
+    },
+    "HomeScreen": {
+      "uuid": "32264778-8bed-531b-a80d-91127711948d",
+      "path": "assets/prefabs/ui/HomeScreen.prefab",
+      "nodeCount": 177,
+      "componentCount": 374
+    },
+    "GameplayHUD": {
+      "uuid": "848a2ba1-2569-5a77-a39f-96f1ee6de149",
+      "path": "assets/prefabs/ui/GameplayHUD.prefab",
+      "nodeCount": 46,
+      "componentCount": 95
+    },
+    "SettingsScreen": {
+      "uuid": "5e42fd2e-032b-59c4-a760-42449abd310c",
+      "path": "assets/prefabs/ui/SettingsScreen.prefab",
+      "nodeCount": 118,
+      "componentCount": 254
+    },
+    "NicknameDialog": {
+      "uuid": "98981fbf-0403-5472-af32-438ab2d86538",
+      "path": "assets/prefabs/ui/NicknameDialog.prefab",
+      "nodeCount": 60,
+      "componentCount": 131
+    },
+    "LeaderboardScreen": {
+      "uuid": "17e23a74-d0d4-5665-a04a-4e01a96a80bf",
+      "path": "assets/prefabs/ui/LeaderboardScreen.prefab",
+      "nodeCount": 230,
+      "componentCount": 471
+    },
+    "PauseScreen": {
+      "uuid": "3c2219d1-c720-52eb-a387-423ae07b2553",
+      "path": "assets/prefabs/ui/PauseScreen.prefab",
+      "nodeCount": 59,
+      "componentCount": 129
+    },
+    "ResultScreen": {
+      "uuid": "1e3141cc-8d4f-5468-ae8b-91c45e53d86d",
+      "path": "assets/prefabs/ui/ResultScreen.prefab",
+      "nodeCount": 61,
+      "componentCount": 135
+    },
+    "ReviveDialog": {
+      "uuid": "c5e11a6c-565c-5a56-a0f7-3bbe5b5c6fad",
+      "path": "assets/prefabs/ui/ReviveDialog.prefab",
+      "nodeCount": 33,
+      "componentCount": 74
+    },
+    "GameplayFxRoot": {
+      "uuid": "8f88e33f-c9f2-5378-a5bd-1df76d1f575d",
+      "path": "assets/prefabs/ui/GameplayFxRoot.prefab",
+      "nodeCount": 293,
+      "componentCount": 583
+    },
+    "GameUIRoot": {
+      "uuid": "95a4e8cb-42f5-5c51-a457-a6641028d89b",
+      "path": "assets/prefabs/ui/GameUIRoot.prefab",
+      "nodeCount": 1100,
+      "componentCount": 2300
+    }
+  },
+  "bindingScriptUuid": "2c6c32c4-6d11-559e-9c4e-1aa9ae6b6dfb",
+  "visualScriptUuid": "135ac581-eeb0-4ee1-91b3-581bd3544411",
+  "fxScriptUuid": "3ca83576-bacf-4f47-90cf-f7796b643c75"
+}

@@ -1,4 +1,5 @@
-export const STAMINA_CAP = 5;
+export const STAMINA_CAP = 5; // Natural recovery limit and initial balance.
+export const STAMINA_AD_REWARD = 5;
 export const STAMINA_INTERVAL_MS = 30 * 60 * 1000;
 export const STAMINA_STORAGE_KEY = 'wxstack-stamina-v1';
 
@@ -16,8 +17,8 @@ export class Stamina {
     this.state = { amount: STAMINA_CAP, nextAt: null };
     try {
       const saved = JSON.parse(storage?.getItem(STAMINA_STORAGE_KEY) ?? 'null');
-      if (saved && Number.isInteger(saved.amount) && saved.amount >= 0 && saved.amount <= STAMINA_CAP
-        && (saved.amount === STAMINA_CAP ? saved.nextAt === null
+      if (saved && Number.isInteger(saved.amount) && saved.amount >= 0
+        && (saved.amount >= STAMINA_CAP ? saved.nextAt === null
           : typeof saved.nextAt === 'number' && Number.isFinite(saved.nextAt) && saved.nextAt > 0)) {
         this.state = { amount: saved.amount, nextAt: saved.nextAt };
       }
@@ -31,8 +32,9 @@ export class Stamina {
     return { ...this.state };
   }
 
-  restore(): void {
-    this.state = { amount: STAMINA_CAP, nextAt: null };
+  grantAdReward(now = Date.now()): void {
+    this.refresh(now);
+    this.state = { amount: this.state.amount + STAMINA_AD_REWARD, nextAt: null };
     this.save();
   }
 

@@ -1,0 +1,121 @@
+{
+  "date": "2026-09-14T11:26:34.105Z",
+  "before": {
+    "roundId": "round-1789385179922-pc5lic1uks",
+    "score": 5,
+    "coins": 105,
+    "perfectCount": 5,
+    "rewarded": 5,
+    "stamina": 4,
+    "layers": [
+      {
+        "x": 0,
+        "z": 0,
+        "width": 5,
+        "depth": 5,
+        "level": 0
+      },
+      {
+        "x": 0,
+        "z": 0,
+        "width": 5,
+        "depth": 5,
+        "level": 1
+      },
+      {
+        "x": 0,
+        "z": 0,
+        "width": 5,
+        "depth": 5,
+        "level": 2
+      },
+      {
+        "x": 0,
+        "z": 0,
+        "width": 5,
+        "depth": 5,
+        "level": 3
+      },
+      {
+        "x": 0,
+        "z": 0,
+        "width": 5,
+        "depth": 5,
+        "level": 4
+      },
+      {
+        "x": 0,
+        "z": 0,
+        "width": 5,
+        "depth": 5,
+        "level": 5
+      }
+    ],
+    "reviveUsed": false,
+    "phase": "gameover",
+    "rows": 0
+  },
+  "after": {
+    "roundId": "round-1789385179922-pc5lic1uks",
+    "score": 5,
+    "coins": 105,
+    "perfectCount": 5,
+    "rewarded": 5,
+    "stamina": 4,
+    "layers": [
+      {
+        "x": 0,
+        "z": 0,
+        "width": 5,
+        "depth": 5,
+        "level": 0
+      },
+      {
+        "x": 0,
+        "z": 0,
+        "width": 5,
+        "depth": 5,
+        "level": 1
+      },
+      {
+        "x": 0,
+        "z": 0,
+        "width": 5,
+        "depth": 5,
+        "level": 2
+      },
+      {
+        "x": 0,
+        "z": 0,
+        "width": 5,
+        "depth": 5,
+        "level": 3
+      },
+      {
+        "x": 0,
+        "z": 0,
+        "width": 5,
+        "depth": 5,
+        "level": 4
+      },
+      {
+        "x": 0,
+        "z": 0,
+        "width": 2.5,
+        "depth": 2.5,
+        "level": 5
+      }
+    ],
+    "reviveUsed": true,
+    "phase": "playing",
+    "rows": 0
+  },
+  "staticUiCallsOver2Seconds": {
+    "drawOverlay": 0,
+    "applyResponsiveLayout": 0,
+    "updateHomeLeaderboardPreviewUI": 0,
+    "updateSettingsUI": 0,
+    "updateLeaderboardUI": 0
+  },
+  "errors": []
+}

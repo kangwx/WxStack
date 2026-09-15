@@ -13,8 +13,9 @@ import {
   EventKeyboard,
   game,
   Game,
-  Graphics,
+  Sprite,
   input,
+  instantiate,
   Input,
   KeyCode,
   Label,
@@ -36,8 +37,21 @@ import {
   view,
   Widget,
 } from 'cc';
+import { DEBUG } from 'cc/env';
+import { UIRouter } from './ui/UIRouter';
+import { UIInputRouter } from './ui/UIInputRouter';
+import { UILayoutService } from './ui/UILayoutService';
+import { UITransitionController } from './ui/UITransitionController';
+import { StackUIPresenter } from './ui/StackUIPresenter';
+import { StackGameUIAdapter } from './ui/StackGameUIAdapter';
+import { PerformanceProbe } from './ui/PerformanceProbe';
+import { StackUIRenderer } from './ui/StackUIRenderer';
+import { HomeScreenView, HomeScreenModel, GameplayHudView, GameplayHudModel, SettingsScreenView, SettingsScreenModel, NicknameDialogView, NicknameDialogModel, LeaderboardScreenView, LeaderboardScreenModel, PauseScreenView, PauseScreenModel, ResultScreenView, ResultScreenModel, ReviveDialogView, ReviveDialogModel, LeaderboardRowModel } from './ui/ScreenViews';
+import { StackUIViewBindings } from './StackUIViewBindings';
+import { StackUIVisual } from './ui/StackUIVisual';
 import { StackWorld3D } from './StackWorld3D';
-import { CREAM_STYLE, RGB } from './CreamStyle';
+import { CREAM_STYLE, RGB, CreamVariant } from './CreamStyle';
+import { loadCreamAppearance, saveCreamAppearance } from './CreamAppearance';
 import { androidGameKey, browserGameKey } from './RemoteInput';
 import {
   DEFAULT_NICKNAME, LeaderboardEntry, LeaderboardRepository, LocalLeaderboardRepository,
@@ -45,9 +59,11 @@ import {
 } from './Leaderboard';
 import { projectorHudLayout, projectorLeaderboardPreviewLayout, projectorPanelLayout } from './ProjectorLayout';
 import { Stamina, STAMINA_CAP } from './Stamina';
-import { ReviveClient, ReviveSession } from './ReviveClient';
+import { RewardAdController } from './ui/RewardAdController';
+import { RewardAdClient } from './RewardAdClient';
+import { encodeRewardQr } from './RewardQrEncoder';
 
-const { ccclass } = _decorator;
+const { ccclass, property } = _decorator;
 
 const DESIGN_WIDTH = 750;
 const DESIGN_HEIGHT = 1334;
@@ -70,7 +86,7 @@ const REDUCED_MOTION_GAME_OVER_REVEAL_SECONDS = 0.12;
 const HOME_FADE_OUT_SECONDS = 0.1;
 const HOME_FADE_IN_SECONDS = 0.16;
 const MENU_SLIDE_DISTANCE = 24;
-const MENU_DIMMER_MAX_ALPHA = 51;
+const MENU_DIMMER_MAX_ALPHA = 32;
 type ScreenTransitionKind = 'menu-open' | 'menu-close' | 'leaderboard-open' | 'leaderboard-close' | 'game-start' | 'home-return';
 const WIDE_LAYOUT_MIN_ASPECT = 1.35;
 const WIDE_LAYOUT_MIN_FRAME_WIDTH = 1024;
@@ -144,10 +160,12 @@ const COPY = {
 type GamePhase = 'ready' | 'playing' | 'dropping' | 'paused' | 'falling' | 'gameover';
 type MoveAxis = 'x' | 'z';
 type HomeOverlay = 'none' | 'settings' | 'leaderboard';
+interface PageModels {home:HomeScreenModel;hud:GameplayHudModel;settings:SettingsScreenModel;nickname:NicknameDialogModel;leaderboard:LeaderboardScreenModel;pause:PauseScreenModel;result:ResultScreenModel;revive:ReviveDialogModel}
+type PagePresenters = {[K in keyof PageModels]:StackUIPresenter<PageModels[K]>};
 
 interface ButtonUI {
   node: Node;
-  graphics: Graphics;
+  graphics: StackUIVisual;
   label: Label;
 }
 
@@ -170,67 +188,50 @@ interface FallingPiece extends StackBlock {
   opacity: number;
 }
 
-interface Spark {
-  x: number;
-  y: number;
-  worldX: number;
-  worldZ: number;
-  level: number;
-  vx: number;
-  vy: number;
-  life: number;
-  maxLife: number;
-  size: number;
-  trailLength: number;
-  color: Color;
-}
-
-interface ImpactRing {
-  worldX: number;
-  worldZ: number;
-  level: number;
-  life: number;
-  maxLife: number;
-  radius: number;
-  color: Color;
-}
-
-interface PerfectFrame {
-  block: StackBlock;
-  elapsed: number;
-  delay: number;
-  duration: number;
-  startExpansion: number;
-  maxExpansion: number;
-  alpha: number;
-  fillAlpha: number;
-  lineWidth: number;
-}
-
-interface Point2 {
-  x: number;
-  y: number;
-}
-
 @ccclass('StackGame')
 export class StackGame extends Component {
+  @property(StackUIViewBindings) ui: StackUIViewBindings = null!;
+  private renderedPhase = '';
+  private renderedOverlay = '';
+  private layoutDirty = true;
+  private uiReady = false;
+  private uiSuspended = false;
+  private frameProjectionCalls = 0;
+  private frameProjectionCacheHits = 0;
+  private renderer!: StackUIRenderer;
+  private pageModels!: PageModels;
+  private pagePresenters!: PagePresenters;
+  private pageOrder: Array<keyof PageModels> = ['home','hud','settings','nickname','leaderboard','pause','result','revive'];
+  private pageRoots!: Record<keyof PageModels,Node>;
+  private readonly inputRouter = new UIInputRouter(() => Date.now());
+  private readonly router = new UIRouter();
+  private readonly layoutService = new UILayoutService(() => this.applyViewportLayout());
+  private readonly transitionController = new UITransitionController(locked => { this.router.transitionLocked=locked; if(this.transitionBlocker)this.transitionBlocker.active=locked; });
+  private readonly presenter = new StackUIPresenter(() => ({phase:this.phase,overlay:this.homeOverlay}), () => {
+    this.drawOverlay(); if(!this.homeTransition)this.drawScreenDimmer(this.screenDimmerAlpha());
+  });
+  private readonly uiAdapter = new StackGameUIAdapter(() => {
+    const stamina=this.stamina.snapshot();
+    return {phase:this.phase,score:this.score,bestScore:this.bestScore,coins:this.coins,testMode:this.testModeEnabled,reducedMotion:this.reducedMotion,soundEnabled:this.soundEnabled,nickname:this.playerNickname,stamina:stamina.amount,staminaNextAt:stamina.nextAt};
+  }, {startRound:()=>this.startGame(),pauseRound:()=>this.pauseGame(),resumeRound:()=>this.resumeGame(),restartRound:()=>this.startGame(),returnHome:()=>this.returnToHome()});
+  private readonly performanceProbe = new PerformanceProbe({enabled:DEBUG && typeof location!=='undefined' && new URLSearchParams(location.search).has('profile'),counterNames:['towerLayers','drawCalls','triangles','activeFx','ringCapacity','ringGrowth','projectionCalls','projectionCacheHits','activeBlocks','looseBlocks','fragmentCapacity','fragmentAvailable','fragmentGrowth','instancing']});
+
   private world3D!: StackWorld3D;
-  private graphics!: Graphics;
-  private effectsGraphics!: Graphics;
+  private graphics!: Node;
   private audioSource!: AudioSource;
   private audioClips = new Map<string, AudioClip>();
   private hudSafeRoot!: Node;
   private gameplayHudGroup!: Node;
   private scoreHudCard!: Node;
-  private scoreHudGraphics!: Graphics;
+  private scoreHudGraphics!: StackUIVisual;
   private bestHudCard!: Node;
-  private bestHudGraphics!: Graphics;
+  private bestHudGraphics!: StackUIVisual;
   private scoreCaptionLabel!: Label;
   private bestCaptionLabel!: Label;
   private scoreLabel!: Label;
   private bestLabel!: Label;
   private recordGapNode!: Node;
-  private recordGapGraphics!: Graphics;
+  private recordGapGraphics!: StackUIVisual;
   private recordGapLabel!: Label;
   private homeBestLabel!: Label;
   private testModeBadgeLabel!: Label;
@@ -241,7 +242,7 @@ export class StackGame extends Component {
   private perfectOpacity!: UIOpacity;
   private startGroup!: Node;
   private testModeToggle!: Node;
-  private testModeToggleGraphics!: Graphics;
+  private testModeToggleGraphics!: StackUIVisual;
   private testModeToggleLabel!: Label;
   private resultGroup!: Node;
   private resultRestartButton!: ButtonUI;
@@ -249,18 +250,18 @@ export class StackGame extends Component {
   private resultReviveButton!: ButtonUI;
   private reviveGroup?: Node;
   private reviveStatusLabel?: Label;
-  private reviveQr?: Graphics;
+  private reviveQr?: Sprite;
   private reviveCloseButton?: ButtonUI;
-  private reviveClient?: ReviveClient;
-  private reviveSession?: ReviveSession;
-  private reviveRequest = 0;
-  private revivePolling = false;
+  private rewardAdController!: RewardAdController;
+  private rewardQrUrl = '';
+  private rewardRoundId = '';
+  private adNotice = '';
   private reviveUsed = false;
   private roundRewardedPerfectCount = 0;
   private resultSelection = 0;
   private homeSelection = 0;
   private startButton!: Node;
-  private startButtonGraphics!: Graphics;
+  private startButtonGraphics!: StackUIVisual;
   private homeBestCaption!: Label;
   private homeCoinCaption!: Label;
   private homeTransition: {
@@ -274,36 +275,36 @@ export class StackGame extends Component {
     opacity: UIOpacity; baseOpacity: number; slide: boolean;
   }[] = [];
   private transitionBlocker!: Node;
-  private screenDimmer!: Graphics;
-  private homePanelGraphics!: Graphics;
-  private pausePanelGraphics!: Graphics;
-  private resultPanelGraphics!: Graphics;
+  private screenDimmer!: Sprite;
+  private homePanelGraphics!: StackUIVisual;
+  private pausePanelGraphics!: StackUIVisual;
+  private resultPanelGraphics!: StackUIVisual;
   private resultTitleLabel!: Label;
   private resultScoreLabel!: Label;
   private resultBestLabel!: Label;
   private pauseButton!: Node;
-  private pauseButtonGraphics!: Graphics;
+  private pauseButtonGraphics!: StackUIVisual;
   private pauseButtonLabel!: Label;
   private pauseGroup!: Node;
   private resumeButton!: Node;
-  private resumeButtonGraphics!: Graphics;
+  private resumeButtonGraphics!: StackUIVisual;
   private resumeButtonLabel!: Label;
   private restartButton!: Node;
-  private restartButtonGraphics!: Graphics;
+  private restartButtonGraphics!: StackUIVisual;
   private restartButtonLabel!: Label;
   private homeButton!: Node;
-  private homeButtonGraphics!: Graphics;
+  private homeButtonGraphics!: StackUIVisual;
   private homeButtonLabel!: Label;
   private homeCoinLabel!: Label;
   private homeBestBadge!: Node;
   private settingsButton!: Node;
-  private settingsButtonGraphics!: Graphics;
+  private settingsButtonGraphics!: StackUIVisual;
   private settingsButtonLabel!: Label;
   private leaderboardButton!: Node;
-  private leaderboardButtonGraphics!: Graphics;
+  private leaderboardButtonGraphics!: StackUIVisual;
   private leaderboardButtonLabel!: Label;
   private homeLeaderboardPreview!: Node;
-  private homeLeaderboardPreviewGraphics!: Graphics;
+  private homeLeaderboardPreviewGraphics!: StackUIVisual;
   private homeLeaderboardPreviewTitle!: Label;
   private homeLeaderboardPreviewHint!: Label;
   private homeLeaderboardPreviewEmpty!: Label;
@@ -315,17 +316,19 @@ export class StackGame extends Component {
   private homeLeaderboardPreviewEntries: LeaderboardEntry[] = [];
   private homeLeaderboardPreviewRequest = 0;
   private settingsGroup!: Node;
-  private settingsGraphics!: Graphics;
+  private settingsGraphics!: StackUIVisual;
   private soundToggle!: ButtonUI;
   private motionToggle!: ButtonUI;
   private settingsCloseButton!: ButtonUI;
+  private appearanceToggle!: ButtonUI;
+  private creamAppearance: CreamVariant = 'standard';
   private restoreStaminaButton!: ButtonUI;
   private nicknameButton!: ButtonUI;
   private nicknameLabel!: Label;
   private nicknameGroup!: Node;
-  private nicknameGraphics!: Graphics;
+  private nicknameGraphics!: StackUIVisual;
   private nicknameEditor!: EditBox;
-  private nicknameInputGraphics!: Graphics;
+  private nicknameInputGraphics!: StackUIVisual;
   private nicknameHint!: Label;
   private nicknameSaveButton!: ButtonUI;
   private nicknameCancelButton!: ButtonUI;
@@ -338,15 +341,15 @@ export class StackGame extends Component {
   private resultCoinLabel!: Label;
   private leaderboard!: LeaderboardRepository;
   private leaderboardGroup!: Node;
-  private leaderboardGraphics!: Graphics;
+  private leaderboardGraphics!: StackUIVisual;
   private leaderboardStatus!: Label;
   private leaderboardEmpty!: Label;
   private leaderboardPageLabel!: Label;
-  private leaderboardRows: { node: Node; graphics: Graphics; rank: Label; player: Label; score: Label; title: Label; detail: Label }[] = [];
+  private leaderboardRows: { node: Node; graphics: StackUIVisual; rank: Label; player: Label; score: Label; title: Label; detail: Label }[] = [];
   private leaderboardScroll!: ScrollView;
   private leaderboardViewport!: Node;
   private leaderboardContent!: Node;
-  private leaderboardScrollTrack!: Graphics;
+  private leaderboardScrollTrack!: StackUIVisual;
   private leaderboardScrollTarget = 0;
   private leaderboardButtons: ButtonUI[] = [];
   private leaderboardHandlers: (() => void)[] = [];
@@ -362,10 +365,6 @@ export class StackGame extends Component {
   private phase: GamePhase = 'ready';
   private stack: StackBlock[] = [];
   private current: StackBlock | null = null;
-  private fallingPieces: FallingPiece[] = [];
-  private sparks: Spark[] = [];
-  private rings: ImpactRing[] = [];
-  private perfectFrames: PerfectFrame[] = [];
 
   private score = 0;
   private bestScore = 0;
@@ -377,11 +376,11 @@ export class StackGame extends Component {
   private coins = INITIAL_COINS;
   private stamina?: Stamina;
   private homeStaminaLabel?: Label;
+  private homeStaminaIcons: Sprite[] = [];
   private soundEnabled = true;
   private testModeEnabled = false;
   private moveAxis: MoveAxis = 'x';
   private moveDirection = 1;
-  private openingBlockEntering = false;
   private moveSpeed = INITIAL_MOVE_SPEED;
   private spawnDelay = 0;
   private resultDelay = 0;
@@ -397,20 +396,12 @@ export class StackGame extends Component {
   private wideLayout = false;
   private tvLayout = false;
   private compactPortrait = false;
-  private isoX = 38;
-  private isoY = 19;
-  private worldOriginY = -320;
-  private cameraY = 0;
-  private targetCameraY = 0;
 
   private trauma = 0;
   private shakeTime = 0;
   private shakeX = 0;
   private shakeY = 0;
   private flashAlpha = 0;
-  private promptTime = 0;
-  private lastActionAt = 0;
-  private heldKeys = new Set<number>();
   private gamepadSouthHeld = false;
   private gamepadOptionsHeld = false;
   private gamepadNorthHeld = false;
@@ -428,13 +419,13 @@ export class StackGame extends Component {
       canvas.focus();
     }
   };
-  private readonly clearBrowserKeys = (): void => { this.heldKeys.clear(); };
+  private readonly clearBrowserKeys = (): void => { this.inputRouter.clear(); };
   private readonly onAndroidRemoteKey = (code: number, action = 0, repeat = 0): boolean => {
     const normalized = androidGameKey(code);
     if (!normalized || (action !== 0 && action !== 1)) return false;
-    if (action === 1) this.heldKeys.delete(normalized);
+    if (action === 1) this.inputRouter.keyUp(normalized);
     else if (!repeat) {
-      this.heldKeys.delete(normalized);
+      this.inputRouter.keyUp(normalized);
       // A host-forwarded remote key never reaches the native text input.
       if (this.nicknameEditing && this.nicknameInputActive && normalized === KeyCode.ENTER) this.onNicknameInputReturn();
       else if (this.nicknameEditing && this.nicknameInputActive
@@ -468,19 +459,19 @@ export class StackGame extends Component {
     event.stopImmediatePropagation();
     if (event.repeat) return;
     // Some WebViews omit keyup when focus changes. A fresh down is a new press.
-    this.heldKeys.delete(keyCode);
+    this.inputRouter.keyUp(keyCode);
     this.handleKeyDownCode(keyCode);
   };
   private readonly onBrowserRemoteKeyUp = (event: KeyboardEvent): void => {
     const keyCode = browserGameKey(event, /Android/i.test(navigator.userAgent));
     if (this.nicknameEditing) {
-      if (keyCode) this.heldKeys.delete(keyCode);
+      if (keyCode) this.inputRouter.keyUp(keyCode);
       return;
     }
     if (keyCode) {
       event.preventDefault();
       event.stopImmediatePropagation();
-      this.heldKeys.delete(keyCode);
+      this.inputRouter.keyUp(keyCode);
     }
   };
 
@@ -492,14 +483,22 @@ export class StackGame extends Component {
     this.stamina = new Stamina(sys.localStorage);
     this.leaderboard = new LocalLeaderboardRepository(sys.localStorage, this.bestScore);
     this.buildStage();
+    this.presenter.setVisible(true);
     this.resizeStage();
     this.showReadyScreen();
+    this.uiReady = true;
+    if(DEBUG && typeof window!=='undefined') (window as any).WxStackDiagnostics={owner:this,start:(label:string)=>this.performanceProbe.start(label),stop:()=>this.performanceProbe.stop(),exportJSON:()=>this.performanceProbe.exportJSON(),adapter:this.uiAdapter};
     this.notifyBrowserReady();
   }
 
   onEnable(): void {
+    if(!this.uiReady)return;
+    const resumed=this.uiSuspended;this.uiSuspended=false;
+    this.world3D.setPaused(this.phase==='paused'||!!this.homeTransition);
+    if(resumed){this.resumeInputLock=0.35;this.inputRouter.clear();this.inputRouter.resetActionClock();this.updateStaminaUI();if(this.phase==='ready')void this.loadHomeLeaderboardPreview();}
+    this.leaderboardScroll.node.on(ScrollView.EventType.SCROLLING, this.updateLeaderboardScrollTrack, this);
     this.schedule(this.updateStaminaUI, 1);
-    this.graphics.node.on(Node.EventType.TOUCH_END, this.onPointerAction, this);
+    this.graphics.on(Node.EventType.TOUCH_END, this.onPointerAction, this);
     this.startButton.on(Button.EventType.CLICK, this.tryPrimaryAction, this);
     this.testModeToggle.on(Button.EventType.CLICK, this.onTestModeToggle, this);
     this.pauseButton.on(Button.EventType.CLICK, this.onPauseButton, this);
@@ -509,7 +508,7 @@ export class StackGame extends Component {
     this.resultHomeButton.node.on(Button.EventType.CLICK, this.onHomeButton, this);
     this.resultRestartButton.node.on(Button.EventType.CLICK, this.tryRestartAction, this);
     this.resultReviveButton.node.on(Button.EventType.CLICK, this.openRevive, this);
-    this.reviveCloseButton.node.on(Button.EventType.CLICK, this.closeRevive, this);
+    this.reviveCloseButton.node.on(Button.EventType.CLICK, this.onRewardDialogAction, this);
     this.settingsButton.on(Button.EventType.CLICK, this.onSettingsButton, this);
     this.leaderboardButton.on(Button.EventType.CLICK, this.onLeaderboardButton, this);
     this.homeLeaderboardPreview.on(Button.EventType.CLICK, this.onLeaderboardButton, this);
@@ -517,6 +516,7 @@ export class StackGame extends Component {
     this.motionToggle.node.on(Button.EventType.CLICK, this.onMotionToggle, this);
     this.restoreStaminaButton.node.on(Button.EventType.CLICK, this.onRestoreStamina, this);
     this.settingsCloseButton.node.on(Button.EventType.CLICK, this.onCloseHomeOverlay, this);
+    this.appearanceToggle.node.on(Button.EventType.CLICK, this.onAppearanceToggle, this);
     this.nicknameButton.node.on(Button.EventType.CLICK, this.openNicknameEditor, this);
     this.nicknameSaveButton.node.on(Button.EventType.CLICK, this.saveNicknameEditor, this);
     this.nicknameCancelButton.node.on(Button.EventType.CLICK, this.closeNicknameEditor, this);
@@ -545,9 +545,13 @@ export class StackGame extends Component {
   }
 
   onDisable(): void {
+    if(!this.uiReady)return;
+    this.uiSuspended=true;
+    this.leaderboardScroll.stopAutoScroll();
+    this.leaderboardScroll.node.off(ScrollView.EventType.SCROLLING, this.updateLeaderboardScrollTrack, this);
     this.closeRevive();
     this.unschedule(this.updateStaminaUI);
-    this.graphics.node.off(Node.EventType.TOUCH_END, this.onPointerAction, this);
+    this.graphics.off(Node.EventType.TOUCH_END, this.onPointerAction, this);
     this.startButton.off(Button.EventType.CLICK, this.tryPrimaryAction, this);
     this.testModeToggle.off(Button.EventType.CLICK, this.onTestModeToggle, this);
     this.pauseButton.off(Button.EventType.CLICK, this.onPauseButton, this);
@@ -557,7 +561,7 @@ export class StackGame extends Component {
     this.resultHomeButton.node.off(Button.EventType.CLICK, this.onHomeButton, this);
     this.resultRestartButton.node.off(Button.EventType.CLICK, this.tryRestartAction, this);
     this.resultReviveButton.node.off(Button.EventType.CLICK, this.openRevive, this);
-    this.reviveCloseButton.node.off(Button.EventType.CLICK, this.closeRevive, this);
+    this.reviveCloseButton.node.off(Button.EventType.CLICK, this.onRewardDialogAction, this);
     this.settingsButton.off(Button.EventType.CLICK, this.onSettingsButton, this);
     this.leaderboardButton.off(Button.EventType.CLICK, this.onLeaderboardButton, this);
     this.homeLeaderboardPreview.off(Button.EventType.CLICK, this.onLeaderboardButton, this);
@@ -566,6 +570,7 @@ export class StackGame extends Component {
     this.motionToggle.node.off(Button.EventType.CLICK, this.onMotionToggle, this);
     this.restoreStaminaButton.node.off(Button.EventType.CLICK, this.onRestoreStamina, this);
     this.settingsCloseButton.node.off(Button.EventType.CLICK, this.onCloseHomeOverlay, this);
+    this.appearanceToggle.node.off(Button.EventType.CLICK, this.onAppearanceToggle, this);
     this.nicknameButton.node.off(Button.EventType.CLICK, this.openNicknameEditor, this);
     this.nicknameSaveButton.node.off(Button.EventType.CLICK, this.saveNicknameEditor, this);
     this.nicknameCancelButton.node.off(Button.EventType.CLICK, this.closeNicknameEditor, this);
@@ -593,7 +598,7 @@ export class StackGame extends Component {
       document.removeEventListener('visibilitychange', this.focusGameCanvas);
       if ((window as any).WxStackRemote?.dispatchKey === this.onAndroidRemoteKey) delete (window as any).WxStackRemote;
     }
-    this.heldKeys.clear();
+    this.inputRouter.clear();
     this.gamepadSouthHeld = false;
     this.gamepadOptionsHeld = false;
     this.gamepadNorthHeld = false;
@@ -604,22 +609,31 @@ export class StackGame extends Component {
       this.finishScreenTransition();
       this.showReadyScreen();
     }
+    this.world3D.setPaused(true);
   }
 
   onDestroy(): void {
+    for(const key of this.pageOrder)this.pagePresenters?.[key].dispose();
+    this.rewardAdController?.dispose();this.presenter.dispose(); this.uiAdapter.dispose(); this.layoutService.dispose(); this.transitionController.dispose();this.performanceProbe.stop();
+    if(DEBUG && typeof window!=='undefined' && (window as any).WxStackDiagnostics?.owner===this) delete (window as any).WxStackDiagnostics;
     this.world3D?.destroy();
   }
 
   update(dt: number): void {
+    this.frameProjectionCalls=0;this.frameProjectionCacheHits=0;
+    this.performanceProbe.beginSection('update');
+    try {
+    if(!this.uiReady)return;
     const elapsed = Number.isFinite(dt) ? Math.max(0, dt) : 0;
     if (this.homeTransition) {
       this.updateHomeTransition(elapsed);
+      this.transitionController.step(elapsed);
       return;
     }
     if (this.phase === 'paused') {
+      this.flushPageViews();
       return;
     }
-    this.promptTime += elapsed;
     this.restartLock = Math.max(0, this.restartLock - elapsed);
     this.resumeInputLock = Math.max(0, this.resumeInputLock - elapsed);
 
@@ -648,9 +662,7 @@ export class StackGame extends Component {
     while (simulationRemaining > 0.000001) {
       const step = Math.min(simulationRemaining, 1 / 20);
       this.updateShake(step);
-      this.updateCamera(step);
       this.updateParticles(step);
-      this.updateFallingPieces(step);
       if (movementRemaining > 0.000001) {
         const movementStep = Math.min(step, movementRemaining);
         this.updateMovingBlock(movementStep);
@@ -660,7 +672,9 @@ export class StackGame extends Component {
     }
 
     const topBlock = this.current ?? this.stack[this.stack.length - 1];
+    this.performanceProbe.beginSection('world');
     this.world3D.tick(elapsed, topBlock?.level ?? 0, this.shakeX, this.shakeY);
+    this.performanceProbe.endSection('world');
     if (this.phase === 'dropping' && this.current) {
       const dropResult = this.world3D.pollDrop(elapsed);
       if (dropResult === 'landed') {
@@ -675,123 +689,345 @@ export class StackGame extends Component {
 
     this.flashAlpha = Math.max(0, this.flashAlpha - elapsed * 3.8);
     this.drawFrame();
-    this.animatePrompt();
+
+    } finally { this.performanceProbe.endSection('update'); }
+  }
+
+  lateUpdate(dt: number): void {
+    if(!this.uiReady || !this.performanceProbe.isRunning)return;
+    this.performanceProbe.recordCounter('towerLayers',this.stack.length);
+    const fx=this.ui.gameplayFx;
+    this.performanceProbe.recordCounter('activeBlocks',this.world3D.activeBlocks);
+    this.performanceProbe.recordCounter('looseBlocks',this.world3D.looseCount);
+    this.performanceProbe.recordCounter('fragmentCapacity',this.world3D.fragmentPoolCapacity);
+    this.performanceProbe.recordCounter('fragmentAvailable',this.world3D.fragmentPoolAvailable);
+    this.performanceProbe.recordCounter('fragmentGrowth',this.world3D.growthCount);
+    this.performanceProbe.recordCounter('instancing',this.world3D.isInstancingEnabled?1:0);
+    this.performanceProbe.recordCounter('activeFx',fx.activeCount);
+    this.performanceProbe.recordCounter('ringCapacity',fx.ringPoolCapacity);
+    this.performanceProbe.recordCounter('ringGrowth',fx.ringExpansionCount);
+    this.performanceProbe.recordCounter('projectionCalls',this.frameProjectionCalls);
+    this.performanceProbe.recordCounter('projectionCacheHits',this.frameProjectionCacheHits);
+    const device=director.root?.device;
+    if(device) {this.performanceProbe.recordCounter('drawCalls',device.numDrawCalls);this.performanceProbe.recordCounter('triangles',device.numTris);}
+    this.performanceProbe.recordFrame(dt);
+  }
+
+  private initializePageViews(): void {
+    const ui=this.ui;
+    this.pageModels={
+      home:{coins:this.coins,bestScore:this.bestScore,staminaText:ui.homeStaminaLabel.string,startText:ui.startPromptLabel.string},
+      hud:{score:this.score,bestScore:this.bestScore,recordGapText:ui.recordGapLabel.string,recordGapVisible:false,perfectText:COPY.perfect},
+      settings:{nickname:this.playerNickname,soundText:COPY.sound,motionText:COPY.reducedMotion,testModeText:COPY.perfectTest,restoreText:'看视频 · 恢复体力'},
+      nickname:{hintText:ui.nicknameHint.string},
+      leaderboard:{statusText:ui.leaderboardStatus.string,emptyText:ui.leaderboardEmpty.string,pageText:ui.leaderboardPageLabel.string,rows:[]},
+      pause:{resumeText:COPY.resume,restartText:COPY.restartRound,homeText:COPY.home},
+      result:{title:COPY.gameOver,score:0,bestText:'',coinText:'',reviveText:'看视频 · 复活',reviveEnabled:true,restartText:COPY.restartRound},
+      revive:{statusText:''}
+    };
+    this.pageRoots={home:this.startGroup,hud:this.gameplayHudGroup,settings:this.settingsGroup,nickname:this.nicknameGroup,leaderboard:this.leaderboardGroup,pause:this.pauseGroup,result:this.resultGroup,revive:this.reviveGroup};
+    const home=new HomeScreenView(ui),hud=new GameplayHudView(ui),settings=new SettingsScreenView(ui),nickname=new NicknameDialogView(ui),leaderboard=new LeaderboardScreenView(ui),pause=new PauseScreenView(ui),result=new ResultScreenView(ui),revive=new ReviveDialogView(ui);
+    this.pagePresenters={
+      home:new StackUIPresenter(()=>this.pageModels.home,model=>home.render(model)),
+      hud:new StackUIPresenter(()=>this.pageModels.hud,model=>hud.render(model)),
+      settings:new StackUIPresenter(()=>this.pageModels.settings,model=>settings.render(model)),
+      nickname:new StackUIPresenter(()=>this.pageModels.nickname,model=>{nickname.render(model);delete this.pageModels.nickname.draftText;}),
+      leaderboard:new StackUIPresenter(()=>this.pageModels.leaderboard,model=>leaderboard.render(model)),
+      pause:new StackUIPresenter(()=>this.pageModels.pause,model=>pause.render(model)),
+      result:new StackUIPresenter(()=>this.pageModels.result,model=>result.render(model)),
+      revive:new StackUIPresenter(()=>this.pageModels.revive,model=>revive.render(model))
+    };
+  }
+
+  private patchPage<K extends keyof PageModels>(page:K,patch:Partial<PageModels[K]>):void {
+    const model=this.pageModels[page];
+    let changed=false;
+    for(const key in patch)if(model[key]!==patch[key]){changed=true;break;}
+    if(!changed)return;
+    Object.assign(model,patch);
+    this.pagePresenters[page].invalidate();
+  }
+
+  private flushPageViews():void {
+    if(!this.pagePresenters)return;
+    for(const key of this.pageOrder){
+      const presenter=this.pagePresenters[key];
+      presenter.setVisible(!this.uiSuspended && this.pageRoots[key].activeInHierarchy);
+      if(presenter.isVisible && presenter.pending){this.performanceProbe.beginSection('ui');presenter.flush();this.performanceProbe.endSection('ui');}
+    }
   }
 
   private buildStage(): void {
-    const canvasTransform = this.node.getComponent(UITransform);
-    if (!canvasTransform) {
-      this.node.addComponent(UITransform);
+    if (!this.ui?.node || !this.node.getComponent(UITransform)) throw new Error('StackGame: GameUIRoot prefab and Canvas UITransform must be bound');
+    if (!this.ui.homeLeaderboardPreviewRows) throw new Error('Missing prefab binding: homeLeaderboardPreviewRows');
+    this.homeLeaderboardPreviewRows = this.ui.homeLeaderboardPreviewRows;
+    if (!this.ui.homeLeaderboardPreviewDetails) throw new Error('Missing prefab binding: homeLeaderboardPreviewDetails');
+    this.homeLeaderboardPreviewDetails = this.ui.homeLeaderboardPreviewDetails;
+    if (!this.ui.homeLeaderboardPreviewRanks) throw new Error('Missing prefab binding: homeLeaderboardPreviewRanks');
+    this.homeLeaderboardPreviewRanks = this.ui.homeLeaderboardPreviewRanks;
+    if (!this.ui.homeLeaderboardPreviewTitles) throw new Error('Missing prefab binding: homeLeaderboardPreviewTitles');
+    this.homeLeaderboardPreviewTitles = this.ui.homeLeaderboardPreviewTitles;
+    if (!this.ui.leaderboardRows) throw new Error('Missing prefab binding: leaderboardRows');
+    this.leaderboardRows = this.ui.leaderboardRows;
+    if (!this.ui.leaderboardButtons) throw new Error('Missing prefab binding: leaderboardButtons');
+    this.leaderboardButtons = this.ui.leaderboardButtons;
+    if (!this.ui.screenDimmer) throw new Error('Missing prefab binding: screenDimmer');
+    this.screenDimmer = this.ui.screenDimmer;
+    if (!this.ui.hudSafeRoot) throw new Error('Missing prefab binding: hudSafeRoot');
+    this.hudSafeRoot = this.ui.hudSafeRoot;
+    if (!this.ui.gameplayHudGroup) throw new Error('Missing prefab binding: gameplayHudGroup');
+    this.gameplayHudGroup = this.ui.gameplayHudGroup;
+    if (!this.ui.scoreHudCard) throw new Error('Missing prefab binding: scoreHudCard');
+    this.scoreHudCard = this.ui.scoreHudCard;
+    if (!this.ui.scoreHudGraphics) throw new Error('Missing prefab binding: scoreHudGraphics');
+    this.scoreHudGraphics = this.ui.scoreHudGraphics;
+    if (!this.ui.scoreCaptionLabel) throw new Error('Missing prefab binding: scoreCaptionLabel');
+    this.scoreCaptionLabel = this.ui.scoreCaptionLabel;
+    if (!this.ui.scoreLabel) throw new Error('Missing prefab binding: scoreLabel');
+    this.scoreLabel = this.ui.scoreLabel;
+    if (!this.ui.bestHudCard) throw new Error('Missing prefab binding: bestHudCard');
+    this.bestHudCard = this.ui.bestHudCard;
+    if (!this.ui.bestHudGraphics) throw new Error('Missing prefab binding: bestHudGraphics');
+    this.bestHudGraphics = this.ui.bestHudGraphics;
+    if (!this.ui.bestCaptionLabel) throw new Error('Missing prefab binding: bestCaptionLabel');
+    this.bestCaptionLabel = this.ui.bestCaptionLabel;
+    if (!this.ui.bestLabel) throw new Error('Missing prefab binding: bestLabel');
+    this.bestLabel = this.ui.bestLabel;
+    if (!this.ui.recordGapNode) throw new Error('Missing prefab binding: recordGapNode');
+    this.recordGapNode = this.ui.recordGapNode;
+    if (!this.ui.recordGapGraphics) throw new Error('Missing prefab binding: recordGapGraphics');
+    this.recordGapGraphics = this.ui.recordGapGraphics;
+    if (!this.ui.recordGapLabel) throw new Error('Missing prefab binding: recordGapLabel');
+    this.recordGapLabel = this.ui.recordGapLabel;
+    if (!this.ui.testModeBadgeLabel) throw new Error('Missing prefab binding: testModeBadgeLabel');
+    this.testModeBadgeLabel = this.ui.testModeBadgeLabel;
+    if (!this.ui.perfectLabel) throw new Error('Missing prefab binding: perfectLabel');
+    this.perfectLabel = this.ui.perfectLabel;
+    if (!this.ui.perfectOpacity) throw new Error('Missing prefab binding: perfectOpacity');
+    this.perfectOpacity = this.ui.perfectOpacity;
+    if (!this.ui.startGroup) throw new Error('Missing prefab binding: startGroup');
+    this.startGroup = this.ui.startGroup;
+    if (!this.ui.homePanelGraphics) throw new Error('Missing prefab binding: homePanelGraphics');
+    this.homePanelGraphics = this.ui.homePanelGraphics;
+    if (!this.ui.settingsButton) throw new Error('Missing prefab binding: settingsButton');
+    this.settingsButton = this.ui.settingsButton;
+    if (!this.ui.settingsButtonGraphics) throw new Error('Missing prefab binding: settingsButtonGraphics');
+    this.settingsButtonGraphics = this.ui.settingsButtonGraphics;
+    if (!this.ui.settingsButtonLabel) throw new Error('Missing prefab binding: settingsButtonLabel');
+    this.settingsButtonLabel = this.ui.settingsButtonLabel;
+    if (!this.ui.leaderboardButton) throw new Error('Missing prefab binding: leaderboardButton');
+    this.leaderboardButton = this.ui.leaderboardButton;
+    if (!this.ui.leaderboardButtonGraphics) throw new Error('Missing prefab binding: leaderboardButtonGraphics');
+    this.leaderboardButtonGraphics = this.ui.leaderboardButtonGraphics;
+    if (!this.ui.leaderboardButtonLabel) throw new Error('Missing prefab binding: leaderboardButtonLabel');
+    this.leaderboardButtonLabel = this.ui.leaderboardButtonLabel;
+    if (!this.ui.homeCoinLabel) throw new Error('Missing prefab binding: homeCoinLabel');
+    this.homeCoinLabel = this.ui.homeCoinLabel;
+    if (!this.ui.homeCoinCaption) throw new Error('Missing prefab binding: homeCoinCaption');
+    this.homeCoinCaption = this.ui.homeCoinCaption;
+    if (!this.ui.homeBestCaption) throw new Error('Missing prefab binding: homeBestCaption');
+    this.homeBestCaption = this.ui.homeBestCaption;
+    if (!this.ui.homeStaminaLabel) throw new Error('Missing prefab binding: homeStaminaLabel');
+    this.homeStaminaLabel = this.ui.homeStaminaLabel;
+    this.homeStaminaLabel.node.active = true;
+    const energyIcon = this.ui.homeStaminaIcon;
+    if (energyIcon) {
+      this.homeStaminaIcons = [energyIcon];
+      for (let index = 1; index < STAMINA_CAP; index++) {
+        const node = instantiate(energyIcon.node);
+        node.name = `HomeEnergy${index + 1}`;
+        node.parent = energyIcon.node.parent;
+        this.homeStaminaIcons.push(node.getComponent(Sprite)!);
+      }
     }
-
+    if (!this.ui.homeBestBadge) throw new Error('Missing prefab binding: homeBestBadge');
+    this.homeBestBadge = this.ui.homeBestBadge;
+    if (!this.ui.homeBestLabel) throw new Error('Missing prefab binding: homeBestLabel');
+    this.homeBestLabel = this.ui.homeBestLabel;
+    if (!this.ui.startButton) throw new Error('Missing prefab binding: startButton');
+    this.startButton = this.ui.startButton;
+    if (!this.ui.startButtonGraphics) throw new Error('Missing prefab binding: startButtonGraphics');
+    this.startButtonGraphics = this.ui.startButtonGraphics;
+    if (!this.ui.startPromptLabel) throw new Error('Missing prefab binding: startPromptLabel');
+    this.startPromptLabel = this.ui.startPromptLabel;
+    if (!this.ui.controlsLabel) throw new Error('Missing prefab binding: controlsLabel');
+    this.controlsLabel = this.ui.controlsLabel;
+    if (!this.ui.precisionTipLabel) throw new Error('Missing prefab binding: precisionTipLabel');
+    this.precisionTipLabel = this.ui.precisionTipLabel;
+    if (!this.ui.homeLeaderboardPreview) throw new Error('Missing prefab binding: homeLeaderboardPreview');
+    this.homeLeaderboardPreview = this.ui.homeLeaderboardPreview;
+    if (!this.ui.homeLeaderboardPreviewGraphics) throw new Error('Missing prefab binding: homeLeaderboardPreviewGraphics');
+    this.homeLeaderboardPreviewGraphics = this.ui.homeLeaderboardPreviewGraphics;
+    if (!this.ui.homeLeaderboardPreviewTitle) throw new Error('Missing prefab binding: homeLeaderboardPreviewTitle');
+    this.homeLeaderboardPreviewTitle = this.ui.homeLeaderboardPreviewTitle;
+    if (!this.ui.homeLeaderboardPreviewSubtitle) throw new Error('Missing prefab binding: homeLeaderboardPreviewSubtitle');
+    this.homeLeaderboardPreviewSubtitle = this.ui.homeLeaderboardPreviewSubtitle;
+    if (!this.ui.homeLeaderboardPreviewEmpty) throw new Error('Missing prefab binding: homeLeaderboardPreviewEmpty');
+    this.homeLeaderboardPreviewEmpty = this.ui.homeLeaderboardPreviewEmpty;
+    if (!this.ui.homeLeaderboardPreviewHint) throw new Error('Missing prefab binding: homeLeaderboardPreviewHint');
+    this.homeLeaderboardPreviewHint = this.ui.homeLeaderboardPreviewHint;
+    if (!this.ui.resultGroup) throw new Error('Missing prefab binding: resultGroup');
+    this.resultGroup = this.ui.resultGroup;
+    if (!this.ui.resultPanelGraphics) throw new Error('Missing prefab binding: resultPanelGraphics');
+    this.resultPanelGraphics = this.ui.resultPanelGraphics;
+    if (!this.ui.resultTitleLabel) throw new Error('Missing prefab binding: resultTitleLabel');
+    this.resultTitleLabel = this.ui.resultTitleLabel;
+    if (!this.ui.resultScoreLabel) throw new Error('Missing prefab binding: resultScoreLabel');
+    this.resultScoreLabel = this.ui.resultScoreLabel;
+    if (!this.ui.resultBestLabel) throw new Error('Missing prefab binding: resultBestLabel');
+    this.resultBestLabel = this.ui.resultBestLabel;
+    if (!this.ui.resultCoinLabel) throw new Error('Missing prefab binding: resultCoinLabel');
+    this.resultCoinLabel = this.ui.resultCoinLabel;
+    if (!this.ui.resultReviveButton) throw new Error('Missing prefab binding: resultReviveButton');
+    this.resultReviveButton = this.ui.resultReviveButton;
+    if (!this.ui.resultRestartButton) throw new Error('Missing prefab binding: resultRestartButton');
+    this.resultRestartButton = this.ui.resultRestartButton;
+    if (!this.ui.resultHomeButton) throw new Error('Missing prefab binding: resultHomeButton');
+    this.resultHomeButton = this.ui.resultHomeButton;
+    if (!this.ui.pauseButton) throw new Error('Missing prefab binding: pauseButton');
+    this.pauseButton = this.ui.pauseButton;
+    if (!this.ui.pauseButtonGraphics) throw new Error('Missing prefab binding: pauseButtonGraphics');
+    this.pauseButtonGraphics = this.ui.pauseButtonGraphics;
+    if (!this.ui.pauseButtonLabel) throw new Error('Missing prefab binding: pauseButtonLabel');
+    this.pauseButtonLabel = this.ui.pauseButtonLabel;
+    if (!this.ui.pauseGroup) throw new Error('Missing prefab binding: pauseGroup');
+    this.pauseGroup = this.ui.pauseGroup;
+    if (!this.ui.pausePanelGraphics) throw new Error('Missing prefab binding: pausePanelGraphics');
+    this.pausePanelGraphics = this.ui.pausePanelGraphics;
+    if (!this.ui.resumeButton) throw new Error('Missing prefab binding: resumeButton');
+    this.resumeButton = this.ui.resumeButton;
+    if (!this.ui.resumeButtonGraphics) throw new Error('Missing prefab binding: resumeButtonGraphics');
+    this.resumeButtonGraphics = this.ui.resumeButtonGraphics;
+    if (!this.ui.resumeButtonLabel) throw new Error('Missing prefab binding: resumeButtonLabel');
+    this.resumeButtonLabel = this.ui.resumeButtonLabel;
+    if (!this.ui.restartButton) throw new Error('Missing prefab binding: restartButton');
+    this.restartButton = this.ui.restartButton;
+    if (!this.ui.restartButtonGraphics) throw new Error('Missing prefab binding: restartButtonGraphics');
+    this.restartButtonGraphics = this.ui.restartButtonGraphics;
+    if (!this.ui.restartButtonLabel) throw new Error('Missing prefab binding: restartButtonLabel');
+    this.restartButtonLabel = this.ui.restartButtonLabel;
+    if (!this.ui.homeButton) throw new Error('Missing prefab binding: homeButton');
+    this.homeButton = this.ui.homeButton;
+    if (!this.ui.homeButtonGraphics) throw new Error('Missing prefab binding: homeButtonGraphics');
+    this.homeButtonGraphics = this.ui.homeButtonGraphics;
+    if (!this.ui.homeButtonLabel) throw new Error('Missing prefab binding: homeButtonLabel');
+    this.homeButtonLabel = this.ui.homeButtonLabel;
+    if (!this.ui.settingsGroup) throw new Error('Missing prefab binding: settingsGroup');
+    this.settingsGroup = this.ui.settingsGroup;
+    if (!this.ui.settingsGraphics) throw new Error('Missing prefab binding: settingsGraphics');
+    this.settingsGraphics = this.ui.settingsGraphics;
+    if (!this.ui.soundToggle) throw new Error('Missing prefab binding: soundToggle');
+    this.soundToggle = this.ui.soundToggle;
+    if (!this.ui.motionToggle) throw new Error('Missing prefab binding: motionToggle');
+    this.motionToggle = this.ui.motionToggle;
+    if (!this.ui.testModeToggle) throw new Error('Missing prefab binding: testModeToggle');
+    this.testModeToggle = this.ui.testModeToggle;
+    if (!this.ui.testModeToggleGraphics) throw new Error('Missing prefab binding: testModeToggleGraphics');
+    this.testModeToggleGraphics = this.ui.testModeToggleGraphics;
+    if (!this.ui.testModeToggleLabel) throw new Error('Missing prefab binding: testModeToggleLabel');
+    this.testModeToggleLabel = this.ui.testModeToggleLabel;
+    if (!this.ui.nicknameButton) throw new Error('Missing prefab binding: nicknameButton');
+    this.nicknameButton = this.ui.nicknameButton;
+    if (!this.ui.nicknameLabel) throw new Error('Missing prefab binding: nicknameLabel');
+    this.nicknameLabel = this.ui.nicknameLabel;
+    if (!this.ui.restoreStaminaButton) throw new Error('Missing prefab binding: restoreStaminaButton');
+    this.restoreStaminaButton = this.ui.restoreStaminaButton;
+    if (!this.ui.settingsCloseButton) throw new Error('Missing prefab binding: settingsCloseButton');
+    this.settingsCloseButton = this.ui.settingsCloseButton;
+    if (!this.ui.appearanceToggle) throw new Error('Missing prefab binding: appearanceToggle');
+    this.appearanceToggle = this.ui.appearanceToggle;
+    if (!this.ui.nicknameGroup) throw new Error('Missing prefab binding: nicknameGroup');
+    this.nicknameGroup = this.ui.nicknameGroup;
+    if (!this.ui.nicknameGraphics) throw new Error('Missing prefab binding: nicknameGraphics');
+    this.nicknameGraphics = this.ui.nicknameGraphics;
+    if (!this.ui.nicknameInputGraphics) throw new Error('Missing prefab binding: nicknameInputGraphics');
+    this.nicknameInputGraphics = this.ui.nicknameInputGraphics;
+    if (!this.ui.nicknameEditor) throw new Error('Missing prefab binding: nicknameEditor');
+    this.nicknameEditor = this.ui.nicknameEditor;
+    if (!this.ui.nicknameHint) throw new Error('Missing prefab binding: nicknameHint');
+    this.nicknameHint = this.ui.nicknameHint;
+    if (!this.ui.nicknameSaveButton) throw new Error('Missing prefab binding: nicknameSaveButton');
+    this.nicknameSaveButton = this.ui.nicknameSaveButton;
+    if (!this.ui.nicknameCancelButton) throw new Error('Missing prefab binding: nicknameCancelButton');
+    this.nicknameCancelButton = this.ui.nicknameCancelButton;
+    if (!this.ui.leaderboardGroup) throw new Error('Missing prefab binding: leaderboardGroup');
+    this.leaderboardGroup = this.ui.leaderboardGroup;
+    if (!this.ui.leaderboardGraphics) throw new Error('Missing prefab binding: leaderboardGraphics');
+    this.leaderboardGraphics = this.ui.leaderboardGraphics;
+    if (!this.ui.leaderboardStatus) throw new Error('Missing prefab binding: leaderboardStatus');
+    this.leaderboardStatus = this.ui.leaderboardStatus;
+    if (!this.ui.leaderboardViewport) throw new Error('Missing prefab binding: leaderboardViewport');
+    this.leaderboardViewport = this.ui.leaderboardViewport;
+    if (!this.ui.leaderboardContent) throw new Error('Missing prefab binding: leaderboardContent');
+    this.leaderboardContent = this.ui.leaderboardContent;
+    if (!this.ui.leaderboardScroll) throw new Error('Missing prefab binding: leaderboardScroll');
+    this.leaderboardScroll = this.ui.leaderboardScroll;
+    if (!this.ui.leaderboardScrollTrack) throw new Error('Missing prefab binding: leaderboardScrollTrack');
+    this.leaderboardScrollTrack = this.ui.leaderboardScrollTrack;
+    if (!this.ui.leaderboardEmpty) throw new Error('Missing prefab binding: leaderboardEmpty');
+    this.leaderboardEmpty = this.ui.leaderboardEmpty;
+    if (!this.ui.leaderboardPageLabel) throw new Error('Missing prefab binding: leaderboardPageLabel');
+    this.leaderboardPageLabel = this.ui.leaderboardPageLabel;
+    if (!this.ui.transitionBlocker) throw new Error('Missing prefab binding: transitionBlocker');
+    this.transitionBlocker = this.ui.transitionBlocker;
+    if (!this.ui.reviveGroup) throw new Error('Missing prefab binding: reviveGroup');
+    this.reviveGroup = this.ui.reviveGroup;
+    if (!this.ui.reviveQr) throw new Error('Missing prefab binding: reviveQr');
+    this.reviveQr = this.ui.reviveQr;
+    if (!this.ui.reviveStatusLabel) throw new Error('Missing prefab binding: reviveStatusLabel');
+    this.reviveStatusLabel = this.ui.reviveStatusLabel;
+    if (!this.ui.reviveCloseButton) throw new Error('Missing prefab binding: reviveCloseButton');
+    this.reviveCloseButton = this.ui.reviveCloseButton;
+    if (!this.ui.graphics) throw new Error('Missing prefab binding: graphics');
+    this.graphics = this.ui.graphics;
+    this.initializePageViews();
+    this.renderer=new StackUIRenderer(this.ui,{home:()=>this.homeLayout(),panel:kind=>this.panelLayout(kind),hud:()=>this.hudLayout(),panelCenterX:width=>this.panelCenterX(width)},()=>({reducedMotion:this.reducedMotion,visibleWidth:this.visibleWidth,visibleHeight:this.visibleHeight,tvLayout:this.tvLayout}));
     this.world3D = new StackWorld3D(this.node, BLOCK_3D_HEIGHT);
-    const graphicsNode = this.makeNode('StackRenderer', this.node);
-    graphicsNode.addComponent(UITransform).setContentSize(DESIGN_WIDTH, DESIGN_HEIGHT);
-    this.graphics = graphicsNode.addComponent(Graphics);
+    this.world3D.setAppearance(this.creamAppearance);
+    this.ui.gameplayFx.initialize((x,z,level,out) => this.world3D.projectToUI(x,z,level,this.ui.gameplayFx.node,out));
+    this.leaderboardHandlers = [() => this.closeHomeOverlay()];
+    for(const visual of this.ui.node.getComponentsInChildren(StackUIVisual))visual.validateBindings();
+    this.rewardAdController = new RewardAdController({
+      client: new RewardAdClient(sys.localStorage),
+      render: state => {
+        const wasVisible = this.reviveGroup.active;
+        this.reviveGroup.active = state.open;
+        if (!wasVisible && state.open) this.router.push('revive', this.resultSelection);
+        if (wasVisible && !state.open) {
+          const route = this.router.pop();
+          if (route && this.phase === 'gameover') this.resultSelection = route.returnFocus;
+        }
+        if (state.open) {
+          const revive = state.pendingAction === 'REVIVE';
+          this.setNamedLabelText(this.reviveGroup, 'ReviveTitle', revive ? '看视频复活' : '看视频恢复体力');
+          this.setNamedLabelText(this.reviveGroup, 'ReviveHint', revive ? '观看完成自动复活 · 宽长至少恢复至 50%' : '完整观看视频后 +5 体力 · 可持续累积');
+          const seconds = Math.max(0, Math.ceil((state.countdownEndsAt - Date.now()) / 1000));
+          const statusText = state.loading ? '正在获取广告…' : `${state.errorMessage || '请用手机扫码，完整观看视频'}\n剩余 ${seconds} 秒`;
+          this.patchPage('revive', { statusText, closeText: '关闭' });
+          this.layoutReviveUI();
+        } else {
+          this.ui.qrCodeView.clear(); this.rewardQrUrl = '';
+          if (state.errorMessage) {
+            this.adNotice = state.errorMessage;
+            this.updateStaminaUI();
+            if (this.homeOverlay === 'settings') { this.nicknameStatus = state.errorMessage; this.updateSettingsUI(); }
+          }
+        }
+      },
+      grant: action => {
+        if (!this.isValid || this.uiSuspended || this.roundId !== this.rewardRoundId) return;
+        if (action === 'REVIVE' && this.phase === 'gameover' && !this.reviveUsed) {
+          this.reviveUsed = true;
+          this.beginScreenTransition(() => this.resumeRevivedRound(), 'game-start');
+        } else if (action === 'ITEM_REWARD') {
+          this.stamina.grantAdReward(); this.adNotice = '';
+          this.nicknameStatus = `视频已完成 · 当前体力 ${this.stamina.snapshot().amount} 点`;
+          this.updateStaminaUI();
+          if (this.homeOverlay === 'settings') this.updateSettingsUI();
+        }
+      },
+    });
 
-    const effectsNode = this.makeNode('StackEffects', this.node);
-    effectsNode.addComponent(UITransform).setContentSize(DESIGN_WIDTH, DESIGN_HEIGHT);
-    this.effectsGraphics = effectsNode.addComponent(Graphics);
-
-    // A stationary, lightly tinted backdrop. Panels own their own graphics so
-    // their labels, focus rings and backgrounds animate as one visual unit.
-    this.screenDimmer = this.makeFullNode('ScreenDimmer', this.node).addComponent(Graphics);
-
-    this.hudSafeRoot = this.makeNode('SafeHud', this.node);
-    this.hudSafeRoot.addComponent(UITransform).setContentSize(DESIGN_WIDTH, DESIGN_HEIGHT);
-    const safeArea = this.hudSafeRoot.addComponent(SafeArea);
-    safeArea.updateArea();
-
-    this.gameplayHudGroup = this.makeFullNode('GameplayHud', this.hudSafeRoot);
-    this.scoreHudCard = this.makeNode('ScoreHudCard', this.gameplayHudGroup);
-    this.scoreHudCard.addComponent(UITransform).setContentSize(152, 112);
-    this.anchorTopLeft(this.scoreHudCard, 42, 32);
-    this.scoreHudGraphics = this.scoreHudCard.addComponent(Graphics);
-    this.scoreCaptionLabel = this.makeLabel('ScoreCaption', this.scoreHudCard, '当前分数', 17, new Color(255, 255, 255, 210), 126, 28);
-    this.scoreCaptionLabel.node.setPosition(0, 30, 0);
-    this.scoreLabel = this.makeLabel('Score', this.scoreHudCard, '0', 48, new Color(255, 255, 255, 245), 126, 62);
-    this.scoreLabel.node.setPosition(0, -12, 0);
-
-    this.bestHudCard = this.makeNode('BestHudCard', this.gameplayHudGroup);
-    this.bestHudCard.addComponent(UITransform).setContentSize(152, 112);
-    this.anchorTopLeft(this.bestHudCard, 42, 198);
-    this.bestHudGraphics = this.bestHudCard.addComponent(Graphics);
-    this.bestCaptionLabel = this.makeLabel('BestCaption', this.bestHudCard, COPY.best, 17, new Color(255, 255, 255, 210), 126, 28);
-    this.bestCaptionLabel.node.setPosition(0, 30, 0);
-    this.bestLabel = this.makeLabel('Best', this.bestHudCard, '0', 40, new Color(255, 255, 255, 235), 126, 58);
-    this.bestLabel.node.setPosition(0, -12, 0);
-    this.buildRecordGapHud();
-    this.gameplayHudGroup.active = false;
-
-    this.testModeBadgeLabel = this.makeLabel('TestModeBadge', this.hudSafeRoot, COPY.testing, 24, new Color(255, 255, 255, 235), 132, 52);
-    this.anchorTopLeft(this.testModeBadgeLabel.node, 34, 170);
-    this.testModeBadgeLabel.node.active = false;
-
-    this.perfectLabel = this.makeLabel('Perfect', this.hudSafeRoot, COPY.perfect, 42, new Color(255, 255, 255, 255), 420, 72);
-    this.anchorCenter(this.perfectLabel.node, 0, 248);
-    this.perfectOpacity = this.perfectLabel.node.addComponent(UIOpacity);
-    this.perfectOpacity.opacity = 0;
-
-    this.startGroup = this.makeFullNode('StartScreen', this.hudSafeRoot);
-    this.homePanelGraphics = this.startGroup.addComponent(Graphics);
-    this.buildHomeButtons();
-    this.homeCoinLabel = this.makeLabel('HomeCoins', this.startGroup, '0', 54, Color.WHITE, 280, 76);
-    this.anchorCenter(this.homeCoinLabel.node, 0, 0);
-    this.homeCoinCaption = this.makeCenteredLabel('HomeCoinCaption', this.startGroup, '金币', 28, 0, 280, 44, Color.WHITE);
-    this.homeBestCaption = this.makeCenteredLabel('HomeBestCaption', this.startGroup, '最高纪录', 28, 0, 280, 44, Color.WHITE);
-    this.homeStaminaLabel = this.makeCenteredLabel('HomeStamina', this.startGroup, '', 24, 0, 560, 40, this.rgb(CREAM_STYLE.textColor));
-    this.homeBestBadge = this.makeNode('HomeBestBadge', this.startGroup);
-    this.homeBestBadge.addComponent(UITransform).setContentSize(400, 84);
-    this.homeBestBadge.addComponent(Graphics);
-    this.anchorCenter(this.homeBestBadge, 0, 0);
-    this.homeBestLabel = this.makeLabel('HomeBest', this.startGroup, '0', 54, Color.WHITE, 280, 76);
-    this.homeCoinLabel.isBold = true;
-    this.homeBestLabel.isBold = true;
-    this.anchorCenter(this.homeBestLabel.node, 0, 0);
-    this.makeCenteredLabel('Eyebrow', this.startGroup, COPY.eyebrow, 22, 326, 540, 48, new Color(255, 255, 255, 210));
-    this.makeCenteredLabel('Title', this.startGroup, COPY.title, 104, 214, 500, 130, new Color(255, 255, 255, 255));
-    this.makeCenteredLabel('Subtitle', this.startGroup, COPY.subtitle, 30, 120, 620, 66, new Color(255, 255, 255, 225));
-    const start = this.makeMenuButton(this.startGroup, 'StartButton', this.audioReady ? COPY.start : COPY.loadingAudio, 620, 116);
-    this.startButton = start.node;
-    this.startButtonGraphics = start.graphics;
-    this.startPromptLabel = start.label;
-    this.anchorCenter(this.startButton, 0, 0);
-    this.controlsLabel = this.makeCenteredLabel('Controls', this.startGroup, COPY.controls, 24, -350, 560, 56, new Color(255, 255, 255, 185));
-    this.precisionTipLabel = this.makeCenteredLabel('PrecisionTip', this.startGroup, COPY.precision, 22, -425, 560, 56, new Color(255, 255, 255, 155));
-    this.buildHomeLeaderboardPreview();
-
-    this.resultGroup = this.makeFullNode('ResultScreen', this.hudSafeRoot);
-    this.resultPanelGraphics = this.resultGroup.addComponent(Graphics);
-    this.resultGroup.addComponent(BlockInputEvents);
-    this.resultTitleLabel = this.makeCenteredLabel('ResultTitle', this.resultGroup, COPY.gameOver, 54, 190, 540, 78, new Color(255, 255, 255, 255));
-    this.resultScoreLabel = this.makeCenteredLabel('ResultScore', this.resultGroup, '0', 108, 62, 380, 128, new Color(255, 255, 255, 255));
-    this.resultBestLabel = this.makeCenteredLabel('ResultBest', this.resultGroup, '', 27, -47, 520, 56, new Color(255, 255, 255, 220));
-    this.resultCoinLabel = this.makeCenteredLabel('ResultCoins', this.resultGroup, '', 24, -116, 540, 48, new Color(255, 245, 190, 245));
-    this.resultReviveButton = this.makeOverlayButton(this.resultGroup, 'ResultRevive', '扫码复活', 400, 88, 0, -160);
-    this.resultRestartButton = this.makeOverlayButton(this.resultGroup, 'ResultRestart', COPY.restartRound, 400, 88, 0, -220);
-    this.resultHomeButton = this.makeOverlayButton(this.resultGroup, 'ResultHome', COPY.home, 400, 88, 0, -338);
-    this.makeCenteredLabel('Restart', this.resultGroup, COPY.restart, 20, -430, 540, 42, new Color(255, 255, 255, 200));
-    this.resultGroup.active = false;
-
-    this.buildPauseUI();
-    this.buildHomeOverlays();
-    this.buildReviveUI();
-  }
-
-  private buildReviveUI(): void {
-    this.reviveGroup = this.makeFullNode('ReviveScreen', this.hudSafeRoot);
-    this.reviveGroup.addComponent(BlockInputEvents);
-    this.reviveGroup.addComponent(Graphics);
-    this.makeCenteredLabel('ReviveTitle', this.reviveGroup, '扫码复活', 48, 390, 540, 76, this.rgb(CREAM_STYLE.textColor));
-    this.makeCenteredLabel('ReviveHint', this.reviveGroup, '恢复半尺寸方块 · 每局一次 · 不扣体力', 24, 300, 540, 60, this.rgb(CREAM_STYLE.textColor));
-    const qr = this.makeNode('ReviveQR', this.reviveGroup);
-    qr.addComponent(UITransform).setContentSize(360, 360);
-    this.anchorCenter(qr, 0, 30);
-    this.reviveQr = qr.addComponent(Graphics);
-    this.reviveStatusLabel = this.makeCenteredLabel('ReviveStatus', this.reviveGroup, '', 26, -245, 540, 108, this.rgb(CREAM_STYLE.textColor));
-    this.reviveCloseButton = this.makeOverlayButton(this.reviveGroup, 'ReviveClose', '返回结算', 480, 96, 0, -390);
-    this.layoutReviveUI();
-    this.reviveGroup.active = false;
   }
 
   private layoutReviveUI(): void {
@@ -799,12 +1035,7 @@ export class StackGame extends Component {
     const width = Math.min(640, this.visibleWidth - 56);
     const height = Math.min(1040, this.visibleHeight - 128);
     const scale = height / 1040;
-    const g = this.reviveGroup.getComponent(Graphics);
-    g.clear();
-    g.fillColor = new Color(30, 22, 27, 100);
-    g.rect(-this.visibleWidth / 2, -this.visibleHeight / 2, this.visibleWidth, this.visibleHeight); g.fill();
-    g.fillColor = this.rgb(CREAM_STYLE.panelColor);
-    g.roundRect(-width / 2, -height / 2, width, height, 40); g.fill();
+    this.renderer.renderRevivePanel(width,height);
     this.layoutPanelLabel(this.reviveGroup, 'ReviveTitle', 0, 406 * scale, width - 64, 76 * scale, 48 * scale, true);
     this.layoutPanelLabel(this.reviveGroup, 'ReviveHint', 0, 318 * scale, width - 64, 60 * scale, 24 * scale);
     this.layoutPanelLabel(this.reviveGroup, 'ReviveStatus', 0, -248 * scale, width - 64, 108 * scale, 26 * scale);
@@ -818,96 +1049,39 @@ export class StackGame extends Component {
   }
 
   private drawReviveQR(): void {
-    if (!this.reviveQr) return;
-    const g = this.reviveQr;
-    g.clear();
-    if (!this.reviveSession) return;
-    const { size, modules } = this.reviveSession;
-    const width = g.node.getComponent(UITransform).width;
-    const unit = width / (size + 8);
-    g.fillColor = Color.WHITE;
-    g.rect(-width / 2, -width / 2, width, width); g.fill();
-    g.fillColor = new Color(0, 0, 0, 255);
-    for (let row = 0; row < size; row++) for (let col = 0; col < size; col++) {
-      if (modules[row * size + col]) {
-        g.rect(-width / 2 + (col + 4) * unit, width / 2 - (row + 5) * unit, unit, unit);
-      }
-    }
-    g.fill();
+    const url = this.rewardAdController?.rewardAdState.adUrl;
+    if (!url) { this.ui.qrCodeView.clear(); this.rewardQrUrl = ''; return; }
+    if (url === this.rewardQrUrl) return;
+    const qr = encodeRewardQr(url);
+    this.ui.qrCodeView.show(url, qr.size, qr.modules);
+    this.rewardQrUrl = url;
   }
 
   private async openRevive(): Promise<void> {
-    if (this.phase !== 'gameover' || this.reviveUsed || this.homeTransition || this.reviveGroup?.active) return;
-    this.reviveClient ??= new ReviveClient();
-    const request = ++this.reviveRequest;
-    const round = this.roundId;
-    this.reviveGroup.active = true;
-    this.reviveStatusLabel.string = '正在生成二维码…';
-    this.layoutReviveUI();
-    try {
-      const session = await this.reviveClient.create();
-      if (!this.isValid || request !== this.reviveRequest || round !== this.roundId || !this.reviveGroup.active) {
-        void this.reviveClient.cancel(session).catch(() => {}); return;
-      }
-      this.reviveSession = session;
-      this.drawReviveQR();
-      this.reviveStatusLabel.string = '请用同一网络的手机扫码\n在手机上点击「确认复活」';
-      this.schedule(this.pollRevive, 1);
-    } catch (error) {
-      if (this.isValid && request === this.reviveRequest && this.reviveGroup.active) {
-        this.reviveStatusLabel.string = `${error.message}\n请返回结算后重试`;
-      }
-    }
+    if (this.homeTransition || this.phase !== 'gameover' || this.reviveUsed) return;
+    this.rewardRoundId = this.roundId; this.adNotice = '';
+    await this.rewardAdController.openRewardAdDialog('REVIVE', 'REVIVE');
   }
 
-  private closeRevive(): void {
-    this.reviveRequest += 1;
-    this.unschedule(this.pollRevive);
-    if (this.reviveGroup) this.reviveGroup.active = false;
-    const session = this.reviveSession;
-    this.reviveSession = undefined;
-    this.drawReviveQR();
-    if (session && this.reviveClient) void this.reviveClient.cancel(session).catch(() => {});
+  private openStaminaReward(): void {
+    if (this.homeTransition || this.uiSuspended || this.reviveGroup?.active) return;
+    this.rewardRoundId = this.roundId; this.adNotice = '';
+    void this.rewardAdController.openRewardAdDialog(this.phase === 'gameover' ? 'SETTLEMENT' : 'MAIN_MENU', 'ITEM_REWARD');
   }
 
-  private async pollRevive(): Promise<void> {
-    if (this.revivePolling || !this.reviveSession || !this.reviveGroup?.active) return;
-    const session = this.reviveSession;
-    const request = this.reviveRequest;
-    const round = this.roundId;
-    if (Date.now() >= session.expiresAt) {
-      this.unschedule(this.pollRevive);
-      this.reviveQr.clear();
-      this.reviveStatusLabel.string = '二维码已过期\n请返回结算后重新扫码'; return;
-    }
-    this.revivePolling = true;
-    try {
-      let result = await this.reviveClient.status(session);
-      if (request !== this.reviveRequest || round !== this.roundId || !this.isValid) return;
-      if (result.state === 'confirmed') result = await this.reviveClient.consume(session);
-      if (request !== this.reviveRequest || round !== this.roundId || !this.isValid
-        || this.phase !== 'gameover' || this.reviveUsed || !this.reviveGroup.active) return;
-      if (result.state === 'consumed') {
-        this.reviveUsed = true;
-        this.closeRevive();
-        this.beginScreenTransition(() => this.resumeRevivedRound(), 'game-start');
-      } else {
-        const seconds = Math.max(0, Math.ceil((session.expiresAt - Date.now()) / 1000));
-        this.reviveStatusLabel.string = `手机扫码后点击「确认复活」\n二维码 ${Math.floor(seconds / 60)}:${(`0${seconds % 60}`).slice(-2)} 后过期`;
-      }
-    } catch (error) {
-      if (this.isValid && request === this.reviveRequest && this.reviveGroup.active) {
-        this.reviveStatusLabel.string = `${error.message}\n正在重试，也可以返回结算`;
-      }
-    } finally { this.revivePolling = false; }
+  private onRewardDialogAction(): void {
+    this.closeRevive();
   }
+
+  private closeRevive(): void { this.rewardAdController?.closeRewardAdDialog(); }
 
   private resumeRevivedRound(): void {
-    // Keep lower layers and the round; restore the supporting top to half the initial footprint.
+    // Keep lower layers and the round; restore each supporting dimension to at least half the initial footprint.
     this.world3D.reset();
+    this.ui.gameplayFx.clear();
     const top = this.stack[this.stack.length - 1];
-    top.width = BASE_SIZE * REVIVE_BLOCK_SCALE;
-    top.depth = BASE_SIZE * REVIVE_BLOCK_SCALE;
+    top.width = Math.max(top.width, BASE_SIZE * REVIVE_BLOCK_SCALE);
+    top.depth = Math.max(top.depth, BASE_SIZE * REVIVE_BLOCK_SCALE);
     this.phase = 'playing';
     this.phaseBeforePause = 'playing';
     this.resultGroup.active = false;
@@ -916,89 +1090,17 @@ export class StackGame extends Component {
     this.pauseButton.active = true;
     this.submittedRoundId = '';
     this.current = null;
-    this.fallingPieces = [];
-    this.sparks = []; this.rings = []; this.perfectFrames = [];
+
+  this.ui.gameplayFx.clearPerfectFrames();
     this.trauma = this.shakeTime = this.shakeX = this.shakeY = this.flashAlpha = 0;
     this.spawnDelay = this.resultDelay = this.restartLock = 0;
     this.resumeInputLock = 0.35;
     this.resetPerfectChain(); this.resetPerfectFeedback();
     this.updateWorldComposition(); this.updateTestModeUI();
+    this.world3D.restoreStack(this.stack);
     this.spawnMovingBlock();
-    this.openingBlockEntering = true;
     this.setScore(this.score, false);
     this.drawFrame();
-  }
-
-  private buildHomeButtons(): void {
-    const settings = this.makeMenuButton(
-      this.startGroup,
-      'SettingsButton',
-      COPY.settings,
-      HOME_MENU_BUTTON_WIDTH,
-      HOME_MENU_BUTTON_HEIGHT,
-    );
-    this.settingsButton = settings.node;
-    this.settingsButtonGraphics = settings.graphics;
-    this.settingsButtonLabel = settings.label;
-    this.anchorCenter(this.settingsButton, 0, HOME_MENU_SETTINGS_Y);
-
-    const leaderboard = this.makeMenuButton(
-      this.startGroup,
-      'LeaderboardButton',
-      COPY.leaderboard,
-      HOME_MENU_BUTTON_WIDTH,
-      HOME_MENU_BUTTON_HEIGHT,
-    );
-    this.leaderboardButton = leaderboard.node;
-    this.leaderboardButtonGraphics = leaderboard.graphics;
-    this.leaderboardButtonLabel = leaderboard.label;
-    this.anchorCenter(this.leaderboardButton, 0, HOME_MENU_LEADERBOARD_Y);
-
-    this.drawHomeButton(
-      this.leaderboardButtonGraphics,
-      this.leaderboardButtonLabel,
-      HOME_MENU_BUTTON_WIDTH,
-      HOME_MENU_BUTTON_HEIGHT,
-    );
-    this.drawHomeButton(
-      this.settingsButtonGraphics,
-      this.settingsButtonLabel,
-      HOME_MENU_BUTTON_WIDTH,
-      HOME_MENU_BUTTON_HEIGHT,
-    );
-  }
-
-  private buildHomeLeaderboardPreview(): void {
-    this.homeLeaderboardPreview = this.makeNode('HomeLeaderboardPreview', this.startGroup);
-    this.homeLeaderboardPreview.addComponent(UITransform);
-    this.anchorCenter(this.homeLeaderboardPreview, 0, 0);
-    this.homeLeaderboardPreviewGraphics = this.homeLeaderboardPreview.addComponent(Graphics);
-    this.homeLeaderboardPreview.addComponent(Button).transition = Button.Transition.NONE;
-    this.homeLeaderboardPreviewTitle = this.makeLabel('PreviewTitle', this.homeLeaderboardPreview,
-      '排行榜 →', 34, Color.WHITE, 312, 44);
-    this.homeLeaderboardPreviewTitle.isBold = true;
-    this.homeLeaderboardPreviewSubtitle = this.makeLabel('PreviewSubtitle', this.homeLeaderboardPreview,
-      '本机 TOP 3 · 挑战新高度', 22, Color.WHITE, 352, 30);
-    this.homeLeaderboardPreviewRanks = [];
-    this.homeLeaderboardPreviewTitles = [];
-    for (let index = 0; index < 3; index += 1) {
-      const row = this.makeLabel(`PreviewRank-${index}`, this.homeLeaderboardPreview, '', 36, Color.WHITE, 312, 48);
-      row.horizontalAlign = Label.HorizontalAlign.LEFT;
-      this.homeLeaderboardPreviewRows.push(row);
-      const detail = this.makeLabel(`PreviewPlayer-${index}`, this.homeLeaderboardPreview, '', 22, Color.WHITE, 312, 28);
-      detail.horizontalAlign = Label.HorizontalAlign.LEFT;
-      this.homeLeaderboardPreviewDetails.push(detail);
-      const rank = this.makeLabel(`PreviewMedal-${index}`, this.homeLeaderboardPreview, `${index + 1}`, 26, Color.WHITE, 46, 42);
-      rank.isBold = true;
-      this.homeLeaderboardPreviewRanks.push(rank);
-      const title = this.makeLabel(`PreviewTitle-${index}`, this.homeLeaderboardPreview, '', 22, Color.WHITE, 190, 30);
-      title.horizontalAlign = Label.HorizontalAlign.LEFT;
-      this.homeLeaderboardPreviewTitles.push(title);
-    }
-    this.homeLeaderboardPreviewEmpty = this.makeLabel('PreviewEmpty', this.homeLeaderboardPreview,
-      '正在加载…', 24, Color.WHITE, 312, 70);
-    this.homeLeaderboardPreviewHint = this.makeLabel('PreviewHint', this.homeLeaderboardPreview,
-      '查看完整榜单  →', 24, Color.WHITE, 312, 34);
   }
 
   private updateHomeLeaderboardPreviewUI(): void {
@@ -1008,15 +1110,10 @@ export class StackGame extends Component {
     const style = CREAM_STYLE;
     const text = this.rgb(style.textColor);
     const g = this.homeLeaderboardPreviewGraphics;
-    g.clear();
-    g.fillColor = this.rgb(style.panelColor);
-    g.roundRect(-layout.panelWidth / 2, -layout.panelHeight / 2, layout.panelWidth, layout.panelHeight, compact ? 16 : 28);
-    g.fill();
-    g.lineWidth = 2;
-    g.strokeColor = new Color(255, 255, 249);
-    g.roundRect(-layout.panelWidth / 2 + 2, -layout.panelHeight / 2 + 2,
-      layout.panelWidth - 4, layout.panelHeight - 4, compact ? 14 : 26);
-    g.stroke();
+    g.reset();g.box(layout.panelWidth,layout.panelHeight,compact?16:28,this.rgb(style.panelColor),new Color(255,255,249));
+    this.ui.homePreviewRowVisuals.forEach(row=>row.reset());
+    this.ui.homePreviewPodium.forEach(sprite=>sprite.node.active=false);
+    this.ui.previewHintBackground.node.active=!compact;
     const place = (label: Label, y: number, size: number, height: number) => {
       label.node.setPosition(0, y, 0);
       label.node.getComponent(UITransform)?.setContentSize(layout.panelWidth - (compact ? 24 : 48), height);
@@ -1038,10 +1135,8 @@ export class StackGame extends Component {
     this.homeLeaderboardPreviewSubtitle.node.active = !compact;
     place(this.homeLeaderboardPreviewSubtitle, layout.titleY - 43, 22, 30);
     if (!compact) {
-      g.fillColor = this.rgb(style.accentColor);
-      g.roundRect(-24, layout.titleY + 33, 48, 4, 2); g.fill();
-      g.fillColor = new Color(220, 235, 222);
-      g.roundRect(-layout.panelWidth / 2 + 24, layout.hintY - 24, layout.panelWidth - 48, 48, 18); g.fill();
+      g.setLayer(g.accent,48,4,0,layout.titleY+35,this.rgb(style.accentColor));
+      const hint=this.ui.previewHintBackground;hint.node.setPosition(0,layout.hintY,0);hint.node.getComponent(UITransform).setContentSize(layout.panelWidth-48,48);hint.color=new Color(220,235,222);
     }
     this.homeLeaderboardPreviewRows.forEach((row, index) => {
       const entry = this.homeLeaderboardPreviewEntries[index];
@@ -1070,22 +1165,17 @@ export class StackGame extends Component {
       place(rank, y - 22, 17, 24); column(rank, -144, 24);
       rank.color = new Color(79, 62, 47);
       if (entry && !compact) {
-        g.fillColor = (index === 0 ? new Color(248, 232, 196) : new Color(246, 237, 224));
-        g.roundRect(-layout.panelWidth / 2 + 18, y - 46, layout.panelWidth - 36, 92, 20); g.fill();
-        this.drawRankAvatar(g, -166, y + 4, 31, entry.score);
-        this.drawRankNumberBadge(g, -144, y - 22, 12, index);
+        const rowVisual=this.ui.homePreviewRowVisuals[index];
+        rowVisual.box(layout.panelWidth-36,92,20,index===0?new Color(248,232,196):new Color(246,237,224),undefined,0,0,y);
+        this.drawRankAvatar(rowVisual,-166,y+4,31,entry.score);this.drawRankNumberBadge(rowVisual,-144,y-22,12,index);
       }
     });
     this.homeLeaderboardPreviewEmpty.node.active = this.homeLeaderboardPreviewEntries.length === 0;
     place(this.homeLeaderboardPreviewEmpty, compact ? layout.rowYs[0] : -48, layout.captionSize, compact ? 30 : 70);
     if (!compact && this.homeLeaderboardPreviewEmpty.node.active) {
       // A small podium gives loading, empty and retry states the same visual identity.
-      for (const [x, height, color] of [
-        [-58, 42, [206, 216, 220]], [0, 70, [235, 194, 112]], [58, 30, [221, 179, 152]],
-      ] as [number, number, RGB][]) {
-        g.fillColor = this.rgb(color);
-        g.roundRect(x - 24, 12, 48, height, 10); g.fill();
-      }
+      const podium=[[-58,42,206,216,220],[0,70,235,194,112],[58,30,221,179,152]];
+      podium.forEach(([x,h,r,b,c],i)=>{const sprite=this.ui.homePreviewPodium[i];sprite.node.active=true;sprite.node.setPosition(x,12+h/2,0);sprite.node.getComponent(UITransform).setContentSize(48,h);sprite.color=new Color(r,b,c);});
     }
     this.homeLeaderboardPreviewHint.node.active = !compact;
     place(this.homeLeaderboardPreviewHint, layout.hintY, layout.captionSize, 34);
@@ -1093,11 +1183,11 @@ export class StackGame extends Component {
   }
 
   private async loadHomeLeaderboardPreview(): Promise<void> {
-    if (!this.homeLeaderboardPreview) return;
+    if (!this.homeLeaderboardPreview || this.uiSuspended) return;
     const request = ++this.homeLeaderboardPreviewRequest;
     this.homeLeaderboardPreviewEmpty.string = '正在加载…';
     this.updateHomeLeaderboardPreviewUI();
-    const stillHome = () => this.isValid && request === this.homeLeaderboardPreviewRequest
+    const stillHome = () => this.isValid && !this.uiSuspended && request === this.homeLeaderboardPreviewRequest
       && this.phase === 'ready' && this.homeOverlay === 'none';
     try {
       await this.leaderboardSubmission;
@@ -1113,87 +1203,6 @@ export class StackGame extends Component {
     this.updateHomeLeaderboardPreviewUI();
   }
 
-  private buildHomeOverlays(): void {
-    this.settingsGroup = this.makeFullNode('SettingsScreen', this.hudSafeRoot);
-    this.settingsGraphics = this.settingsGroup.addComponent(Graphics);
-    this.settingsGroup.addComponent(BlockInputEvents);
-    this.makeCenteredLabel('SettingsTitle', this.settingsGroup, COPY.settingsTitle, 56, 270, 520, 88, new Color(255, 255, 255, 255));
-    this.makeCenteredLabel('SettingsHint', this.settingsGroup, COPY.settingsHint, 23, 185, 520, 50, new Color(255, 255, 255, 160));
-    this.soundToggle = this.makeOverlayButton(this.settingsGroup, 'SoundToggle', '', 500, 104, 0, 65);
-    this.motionToggle = this.makeOverlayButton(this.settingsGroup, 'MotionToggle', '', 500, 104, 0, -70);
-    this.buildTestModeToggle();
-    this.nicknameButton = this.makeOverlayButton(this.settingsGroup, 'NicknameButton', '修改昵称', 500, 104, 0, -282);
-    this.nicknameLabel = this.makeLabel('CurrentNickname', this.nicknameButton.node, this.playerNickname, 25, Color.WHITE, 360, 30);
-    this.restoreStaminaButton = this.makeOverlayButton(this.settingsGroup, 'RestoreStamina', '恢复体力 · 补满至 5 点', 500, 104, 0, -350);
-    this.settingsCloseButton = this.makeOverlayButton(this.settingsGroup, 'SettingsClose', COPY.close, 400, 92, 0, -250);
-    this.settingsGroup.active = false;
-    this.buildNicknameEditor();
-
-    this.buildLeaderboardUI();
-
-    this.transitionBlocker = this.makeFullNode('TransitionInputBlocker', this.node);
-    this.transitionBlocker.addComponent(BlockInputEvents);
-    this.transitionBlocker.active = false;
-
-    this.updateSettingsUI();
-  }
-
-  private buildLeaderboardUI(): void {
-    this.leaderboardGroup = this.makeFullNode('LeaderboardScreen', this.hudSafeRoot);
-    this.leaderboardGraphics = this.leaderboardGroup.addComponent(Graphics);
-    this.leaderboardGroup.addComponent(BlockInputEvents);
-    this.makeCenteredLabel('LeaderboardTitle', this.leaderboardGroup, COPY.leaderboard, 54, 450, 520, 82, Color.WHITE);
-    this.leaderboardStatus = this.makeCenteredLabel('LeaderboardStatus', this.leaderboardGroup, '本机 Top 10 · 每局成绩', 24, 377, 530, 52, Color.WHITE);
-    this.makeCenteredLabel('LeaderboardRankHeading', this.leaderboardGroup, '排名', 23, 310, 74, 42, Color.WHITE);
-    const columns = this.makeCenteredLabel('LeaderboardColumns', this.leaderboardGroup, '玩家 / 段位', 23, 310, 390, 42, Color.WHITE);
-    columns.horizontalAlign = Label.HorizontalAlign.LEFT;
-    this.makeCenteredLabel('LeaderboardScoreHeading', this.leaderboardGroup, '叠高 / 层', 23, 310, 180, 42, Color.WHITE);
-    this.leaderboardViewport = this.makeNode('LeaderboardViewport', this.leaderboardGroup);
-    this.leaderboardViewport.addComponent(UITransform).setContentSize(520, 768);
-    this.leaderboardViewport.addComponent(MaskComponent).type = MaskComponent.Type.GRAPHICS_RECT;
-    this.leaderboardContent = this.makeNode('LeaderboardContent', this.leaderboardViewport);
-    const contentTransform = this.leaderboardContent.addComponent(UITransform);
-    contentTransform.setAnchorPoint(0.5, 1);
-    contentTransform.setContentSize(520, 1584);
-    this.leaderboardScroll = this.leaderboardViewport.addComponent(ScrollView);
-    this.leaderboardScroll.content = this.leaderboardContent;
-    this.leaderboardScroll.horizontal = false;
-    this.leaderboardScroll.vertical = true;
-    this.leaderboardScroll.elastic = false;
-    this.leaderboardScroll.inertia = true;
-    this.leaderboardScroll.brake = 0.65;
-    this.leaderboardScroll.cancelInnerEvents = true;
-    const track = this.makeNode('LeaderboardScrollTrack', this.leaderboardGroup);
-    track.addComponent(UITransform);
-    this.leaderboardScrollTrack = track.addComponent(Graphics);
-    this.leaderboardViewport.on(ScrollView.EventType.SCROLLING, this.updateLeaderboardScrollTrack, this);
-    for (let index = 0; index < 10; index += 1) {
-      const node = this.makeNode(`LeaderboardRow-${index}`, this.leaderboardContent);
-      node.addComponent(UITransform).setContentSize(520, 82);
-      const graphics = node.addComponent(Graphics);
-      const rank = this.makeLabel('Rank', node, '', 36, Color.WHITE, 74, 62);
-      rank.isBold = true;
-      rank.node.setPosition(-209, 0, 0);
-      const player = this.makeLabel('Player', node, '', 24, Color.WHITE, 390, 30);
-      player.horizontalAlign = Label.HorizontalAlign.LEFT;
-      const score = this.makeLabel('Score', node, '', 30, Color.WHITE, 390, 40);
-      score.isBold = true;
-      score.horizontalAlign = Label.HorizontalAlign.CENTER;
-      score.node.setPosition(43, 19, 0);
-      const detail = this.makeLabel('Detail', node, '', 21, Color.WHITE, 390, 32);
-      detail.horizontalAlign = Label.HorizontalAlign.LEFT;
-      detail.node.setPosition(43, -22, 0);
-      const title = this.makeLabel('Title', node, '', 26, Color.WHITE, 390, 36);
-      title.horizontalAlign = Label.HorizontalAlign.LEFT;
-      this.leaderboardRows.push({ node, graphics, rank, player, score, title, detail });
-    }
-    this.leaderboardEmpty = this.makeCenteredLabel('LeaderboardEmpty', this.leaderboardGroup, '', 30, 80, 520, 160, Color.WHITE);
-    this.leaderboardPageLabel = this.makeCenteredLabel('LeaderboardScrollHint', this.leaderboardGroup, '', 22, -538, 520, 38, Color.WHITE);
-    this.leaderboardButtons.push(this.makeOverlayButton(this.leaderboardGroup, 'LeaderboardClose', '×', 76, 76, 0, 0));
-    this.leaderboardHandlers.push(() => this.closeHomeOverlay());
-    this.leaderboardGroup.active = false;
-  }
-
   private updateLeaderboardUI(): void {
     if (!this.leaderboardGraphics) return;
     const layout = this.panelLayout('leaderboard');
@@ -1207,39 +1216,30 @@ export class StackGame extends Component {
     }
     // Decorative divider and accent underline keep the header distinct from the moving list.
     const panel = this.leaderboardGraphics;
-    panel.fillColor = accent;
-    panel.roundRect(-layout.contentWidth / 2, layout.subtitleY - 5, 68, 10, 5);
-    panel.fill();
-    panel.fillColor = new Color(text.r, text.g, text.b, 28);
-    panel.rect(-layout.contentWidth / 2, layout.listTop + 9, layout.contentWidth, 1);
-    panel.fill();
+    panel.setLayer(panel.accent,68,10,-layout.contentWidth/2+34,layout.subtitleY,accent);
+    panel.setLayer(panel.arrow,layout.contentWidth,1,0,layout.listTop+9.5,new Color(text.r,text.g,text.b,28));
+    const rowModels:LeaderboardRowModel[]=this.leaderboardRows.map(()=>({visible:false,rankText:'',playerText:'',scoreText:'',titleText:'',detailText:''}));
     this.leaderboardRows.forEach((row, index) => {
+      const model=rowModels[index];
       const rank = index;
       const entry = this.leaderboardEntries[rank];
-      row.node.active = !!entry && !this.leaderboardLoading;
+      model.visible = !!entry && !this.leaderboardLoading;
       if (!entry) return;
       const currentRound = entry.id === this.submittedRoundId;
-      row.graphics.clear();
-      this.drawLeaderboardGradient(row.graphics, -layout.rowWidth / 2, -layout.rowHeight / 2,
-        layout.rowWidth, layout.rowHeight, 18,
-        (currentRound ? [227, 241, 226] : [255, 253, 243]),
-        (currentRound ? [213, 233, 218] : [246, 234, 220]));
-      row.graphics.strokeColor = currentRound ? accent : new Color(169, 139, 133, 75);
-      row.graphics.lineWidth = currentRound ? 3 : 1;
-      row.graphics.roundRect(-layout.rowWidth / 2, -layout.rowHeight / 2, layout.rowWidth, layout.rowHeight, 18);
-      row.graphics.stroke();
+      row.graphics.reset();
+      row.graphics.gradientBox(layout.rowWidth,layout.rowHeight,currentRound,currentRound?accent:new Color(169,139,133,75),currentRound?3:1);
       // Avatar follows the score tier; the small numbered badge follows list position.
       this.drawRankAvatar(row.graphics, layout.rankX, 5, 40, entry.score);
       this.drawRankNumberBadge(row.graphics, layout.rankX + 26, -28, 18, rank);
-      row.rank.string = rank < 9 ? `0${rank + 1}` : `${rank + 1}`;
-      row.player.string = `${entry.nickname || '本地玩家'}${currentRound ? ' · 本局' : ''}`;
-      row.score.string = `${entry.score}`;
-      row.title.string = leaderboardTitle(entry.score);
-      if (entry.kind === 'legacy') row.detail.string = '历史纪录 · 详情未记录';
+      model.rankText = rank < 9 ? `0${rank + 1}` : `${rank + 1}`;
+      model.playerText = `${entry.nickname || '本地玩家'}${currentRound ? ' · 本局' : ''}`;
+      model.scoreText = `${entry.score}`;
+      model.titleText = leaderboardTitle(entry.score);
+      if (entry.kind === 'legacy') model.detailText = '历史纪录 · 详情未记录';
       else {
         const date = new Date(entry.finishedAt!);
         const pad = (value: number) => value < 10 ? `0${value}` : `${value}`;
-        row.detail.string = `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}  · 完美 ${entry.perfectCount} 次`;
+        model.detailText = `${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}  · 完美 ${entry.perfectCount} 次`;
       }
       row.rank.color = new Color(56, 46, 31, 255);
       row.score.color = text;
@@ -1248,137 +1248,26 @@ export class StackGame extends Component {
       row.title.isBold = true;
       row.detail.color = secondary;
     });
-    this.leaderboardEmpty.node.active = this.leaderboardLoading || this.leaderboardEntries.length === 0;
-    this.leaderboardPageLabel.string = this.leaderboardLoading ? '' : this.leaderboardEntries.length > 4
-      ? '↑ ↓ 滚动  ·  滑动 / 滚轮  ·  返回键关闭' : '本机成绩  ·  返回键关闭';
+    this.patchPage('leaderboard',{rows:rowModels,emptyVisible:this.leaderboardLoading||this.leaderboardEntries.length===0});
+    this.patchPage('leaderboard',{pageText:this.leaderboardLoading ? '' : this.leaderboardEntries.length > 4
+      ? '↑ ↓ 滚动  ·  滑动 / 滚轮  ·  返回键关闭' : '本机成绩  ·  返回键关闭'});
     this.leaderboardButtons.forEach(button => {
-      button.graphics.clear();
-      button.label.string = '';
-      button.graphics.strokeColor = accent;
-      button.graphics.lineWidth = 4;
-      button.graphics.moveTo(-17, -17);
-      button.graphics.lineTo(17, 17);
-      button.graphics.moveTo(-17, 17);
-      button.graphics.lineTo(17, -17);
-      button.graphics.stroke();
+      const g=button.graphics;g.reset();button.label.string='';
+      g.setLayer(g.accent,48,4,0,0,accent);g.accent.node.angle=45;
+      g.setLayer(g.detail,48,4,0,0,accent);g.detail.node.angle=-45;
     });
     this.layoutLeaderboardList();
   }
 
   /** Opaque rounded gradient: short horizontal bands avoid bitmap assets and scale cleanly on TVs. */
-  private drawLeaderboardGradient(g: Graphics, x: number, y: number, width: number, height: number,
-    radius: number, top: number[], bottom: number[]): void {
-    const steps = 40;
-    for (let i = 0; i < steps; i++) {
-      const t = i / (steps - 1);
-      const band = height / steps;
-      const edge = Math.min((i + 0.5) * band, height - (i + 0.5) * band);
-      const inset = edge < radius ? radius - Math.sqrt(Math.max(0, radius * radius - (radius - edge) ** 2)) : 0;
-      g.fillColor = new Color(...bottom.map((value, channel) => Math.round(value + (top[channel] - value) * t)) as [number, number, number]);
-      g.rect(x + inset, y + i * band, width - inset * 2, band + 0.2);
-      g.fill();
-    }
-  }
 
-  private drawLeaderboardPanel(): void {
-    const layout = this.panelLayout('leaderboard');
-    const g = this.leaderboardGraphics;
-    const w = layout.panelWidth;
-    const h = layout.panelHeight;
-    g.clear();
-    for (const [inset, alpha] of [[14, 12], [7, 22], [0, 36]]) {
-      g.fillColor = this.rgb(CREAM_STYLE.shadow, alpha);
-      g.roundRect(-w / 2 - inset, -h / 2 - inset - 8, w + inset * 2, h + inset * 2, 44 + inset);
-      g.fill();
-    }
-    g.fillColor = this.rgb(CREAM_STYLE.panelColor);
-    g.roundRect(-w / 2, -h / 2, w, h, 44);
-    g.fill();
-    g.strokeColor = new Color(255, 255, 245, 220);
-    g.lineWidth = 2;
-    g.roundRect(-w / 2, -h / 2, w, h, 44);
-    g.stroke();
-    g.strokeColor = new Color(174, 234, 220, 30);
-    g.roundRect(-w / 2 + 5, -h / 2 + 5, w - 10, h - 10, 40);
-    g.stroke();
-    g.fillColor = new Color(190, 157, 146, 32);
-    g.roundRect(-layout.contentWidth / 2 - 6, layout.listTop - layout.listHeight - 4,
-      layout.contentWidth + 12, layout.listHeight + 80, 24);
-    g.fill();
-  }
 
-  private drawRankNumberBadge(g: Graphics, x: number, y: number, radius: number, rank: number): void {
-    const colors = [[245, 201, 105], [203, 221, 230], [220, 165, 126]];
-    const c = colors[rank] ?? [241, 231, 215];
-    g.fillColor = new Color(c[0], c[1], c[2]);
-    g.circle(x, y, radius); g.fill();
-    g.strokeColor = new Color(255, 250, 237);
-    g.lineWidth = 2; g.circle(x, y, radius); g.stroke();
-  }
+  private drawLeaderboardPanel():void { this.renderer.renderLeaderboardPanel(); }
+
+  private drawRankNumberBadge(g: StackUIVisual,x:number,y:number,radius:number,rank:number):void { this.renderer.renderRankBadge(g,x,y,radius,rank); }
 
   /** Six code-drawn toy portraits: distinct silhouettes remain legible at HUD size. */
-  private drawRankAvatar(g: Graphics, x: number, y: number, radius: number, score: number): void {
-    const tier = leaderboardTier(score);
-    const backgrounds: readonly RGB[] = [[244, 220, 196], [226, 233, 243], [252, 234, 177],
-      [207, 235, 222], [208, 230, 248], [234, 217, 246]];
-    const coats: readonly RGB[] = [[179, 120, 81], [133, 153, 181], [204, 145, 49],
-      [68, 145, 129], [82, 130, 193], [137, 99, 174]];
-    const coat = coats[tier];
-    const face: RGB = [255, 242, 215];
-    const ink: RGB = [62, 51, 64];
-    const s = radius / 50;
-    const circle = (cx: number, cy: number, r: number, color: RGB) => {
-      g.fillColor = this.rgb(color); g.circle(x + cx * s, y + cy * s, r * s); g.fill();
-    };
-    const rect = (cx: number, cy: number, w: number, h: number, r: number, color: RGB) => {
-      g.fillColor = this.rgb(color);
-      g.roundRect(x + cx * s, y + cy * s, w * s, h * s, r * s); g.fill();
-    };
-    const polygon = (points: number[][], color: RGB) => {
-      g.fillColor = this.rgb(color);
-      g.moveTo(x + points[0][0] * s, y + points[0][1] * s);
-      for (const [px, py] of points.slice(1)) g.lineTo(x + px * s, y + py * s);
-      g.close(); g.fill();
-    };
-    circle(0, 0, 50, backgrounds[tier]);
-    g.strokeColor = new Color(255, 253, 240); g.lineWidth = 2 * s;
-    g.circle(x, y, 47 * s); g.stroke();
-    if (tier === 0) { // Bronze bear: rounded ears and a warm copper coat.
-      circle(-23, 23, 13, coat); circle(23, 23, 13, coat);
-      circle(-23, 23, 6, face); circle(23, 23, 6, face);
-    } else if (tier === 1) { // Silver cat: pointed ears.
-      polygon([[-31, 6], [-29, 38], [-6, 20]], coat);
-      polygon([[31, 6], [29, 38], [6, 20]], coat);
-    } else if (tier === 2) { // Golden lion: a broad sun-shaped mane.
-      polygon(Array.from({ length: 24 }, (_, i) => {
-        const angle = i * Math.PI / 12; const r = i % 2 ? 33 : 42;
-        return [Math.cos(angle) * r, Math.sin(angle) * r - 3];
-      }), coat);
-    } else if (tier === 3) { // Platinum owl: swept feathers and eye discs.
-      polygon([[-35, -23], [-38, 32], [-9, 18], [9, 18], [38, 32], [35, -23], [0, -39]], coat);
-    } else if (tier === 4) { // Diamond robot: square head and crystal antenna.
-      rect(-3, 20, 6, 16, 2, coat);
-      polygon([[0, 45], [10, 36], [0, 27], [-10, 36]], [77, 180, 210]);
-      rect(-37, -10, 9, 18, 4, coat); rect(28, -10, 9, 18, 4, coat);
-    }
-    rect(-31, -31, 62, 56, tier === 4 ? 10 : 23, coat);
-    rect(-24, -25, 48, 39, tier === 4 ? 7 : 18, face);
-    if (tier === 3) {
-      circle(-12, 1, 14, face); circle(12, 1, 14, face);
-      polygon([[-5, -8], [5, -8], [0, -16]], [204, 145, 49]);
-    }
-    circle(-11, 0, tier === 3 ? 5 : 3.8, ink); circle(11, 0, tier === 3 ? 5 : 3.8, ink);
-    if (tier !== 3) {
-      circle(-19, -10, 4, [232, 169, 163]); circle(19, -10, 4, [232, 169, 163]);
-      g.strokeColor = this.rgb(ink); g.lineWidth = 2.5 * s;
-      g.moveTo(x - 5 * s, y - 11 * s); g.lineTo(x, y - 15 * s); g.lineTo(x + 5 * s, y - 11 * s); g.stroke();
-    }
-    if (tier === 5) { // King: purple cloak, three-point crown and a ruby.
-      polygon([[-26, 18], [-30, 38], [-13, 28], [0, 44], [13, 28], [30, 38], [26, 18]], [236, 191, 83]);
-      rect(-25, 15, 50, 8, 3, [250, 216, 125]);
-      polygon([[0, 31], [6, 25], [0, 19], [-6, 25]], [177, 91, 133]);
-    }
-  }
+  private drawRankAvatar(g: StackUIVisual,x:number,y:number,radius:number,score:number):void { this.renderer.renderRankAvatar(g,x,y,radius,leaderboardTier(score)); }
 
   private moveLeaderboardSelection(direction: number): void {
     this.scrollLeaderboard(direction);
@@ -1404,23 +1293,7 @@ export class StackGame extends Component {
     this.updateLeaderboardScrollTrack();
   }
 
-  private updateLeaderboardScrollTrack(): void {
-    if (!this.leaderboardScrollTrack) return;
-    const layout = this.panelLayout('leaderboard');
-    const g = this.leaderboardScrollTrack;
-    g.clear();
-    const max = this.leaderboardScroll.getMaxScrollOffset().y;
-    if (max <= 0 || this.leaderboardLoading) return;
-    const x = layout.contentWidth / 2 - 5;
-    const height = Math.max(48, layout.listHeight * layout.listHeight / (max + layout.listHeight));
-    const progress = Math.max(0, Math.min(1, this.leaderboardScroll.getScrollOffset().y / max));
-    g.fillColor = new Color(130, 189, 190, 90);
-    g.roundRect(x, layout.listTop - layout.listHeight, 5, layout.listHeight, 2);
-    g.fill();
-    g.fillColor = new Color(87, 126, 113);
-    g.roundRect(x, layout.listTop - height - progress * (layout.listHeight - height), 5, height, 2);
-    g.fill();
-  }
+  private updateLeaderboardScrollTrack():void { this.renderer.renderScrollbar({maxOffset:this.leaderboardScroll.getMaxScrollOffset().y,offset:this.leaderboardScroll.getScrollOffset().y,loading:this.leaderboardLoading}); }
 
   private layoutLeaderboardList(): void {
     if (!this.leaderboardScroll) return;
@@ -1465,20 +1338,20 @@ export class StackGame extends Component {
     const request = ++this.leaderboardRequest;
     this.leaderboardLoading = true;
     this.leaderboardEntries = [];
-    this.leaderboardEmpty.string = '正在加载成绩…';
-    this.leaderboardStatus.string = '本机 Top 10 · 每局成绩';
+    this.patchPage('leaderboard',{emptyText:'正在加载成绩…'});
+    this.patchPage('leaderboard',{statusText:'本机 Top 10 · 每局成绩'});
     this.updateLeaderboardUI();
     try {
       await this.leaderboardSubmission;
       const snapshot = await this.leaderboard.list();
-      if (!this.isValid || request !== this.leaderboardRequest || this.homeOverlay !== 'leaderboard') return;
+      if (!this.isValid || this.uiSuspended || request !== this.leaderboardRequest || this.homeOverlay !== 'leaderboard') return;
       this.leaderboardEntries = snapshot.entries.slice(0, 10);
-      this.leaderboardStatus.string = this.leaderboardSaveFailed ? '本局成绩暂未保存'
-        : snapshot.persistent ? '本机 Top 10 · 每局成绩' : '本次会话排行 · 关闭后不保留';
-      this.leaderboardEmpty.string = '还没有成绩\n完成一局即可上榜';
+      this.patchPage('leaderboard',{statusText:this.leaderboardSaveFailed ? '本局成绩暂未保存'
+        : snapshot.persistent ? '本机 Top 10 · 每局成绩' : '本次会话排行 · 关闭后不保留'});
+      this.patchPage('leaderboard',{emptyText:'还没有成绩\n完成一局即可上榜'});
     } catch {
-      if (!this.isValid || request !== this.leaderboardRequest || this.homeOverlay !== 'leaderboard') return;
-      this.leaderboardEmpty.string = '成绩暂时无法加载\n请返回后重试';
+      if (!this.isValid || this.uiSuspended || request !== this.leaderboardRequest || this.homeOverlay !== 'leaderboard') return;
+      this.patchPage('leaderboard',{emptyText:'成绩暂时无法加载\n请返回后重试'});
     }
     this.leaderboardLoading = false;
     this.updateLeaderboardUI();
@@ -1496,55 +1369,7 @@ export class StackGame extends Component {
     }).catch(() => { this.leaderboardSaveFailed = true; });
   }
 
-  private makeMenuButton(parent: Node, name: string, text: string, width: number, height: number): ButtonUI {
-    const node = this.makeNode(name, parent);
-    node.addComponent(UITransform).setContentSize(width, height);
-    const graphics = node.addComponent(Graphics);
-    const button = node.addComponent(Button);
-    button.transition = Button.Transition.NONE;
-    const label = this.makeLabel(`${name}Label`, node, text, 30, new Color(255, 255, 255, 238), width - 18, height - 8);
-    return { node, graphics, label };
-  }
-
-  private makeOverlayButton(
-    parent: Node,
-    name: string,
-    text: string,
-    width: number,
-    height: number,
-    horizontalCenter: number,
-    verticalCenter: number,
-  ): ButtonUI {
-    const ui = this.makeMenuButton(parent, name, text, width, height);
-    this.anchorCenter(ui.node, horizontalCenter, verticalCenter);
-    return ui;
-  }
-
-  private drawHomeButton(
-    graphics: Graphics,
-    label: Label,
-    width: number,
-    height: number,
-    selected = false,
-  ): void {
-    const style = CREAM_STYLE;
-    graphics.clear();
-    graphics.fillColor = selected
-      ? this.rgb(style.accentColor)
-      : this.rgb(style.buttonColor);
-    graphics.roundRect(-width * 0.5, -height * 0.5, width, height, 28);
-    graphics.fill();
-    graphics.strokeColor = this.rgb(style.accentColor, selected ? 255 : 126);
-    graphics.lineWidth = selected ? 4 : 2;
-    graphics.roundRect(-width * 0.5, -height * 0.5, width, height, 28);
-    graphics.stroke();
-    if (selected) this.drawHomeFocus(graphics, 0, width, height);
-    label.color = selected
-      ? this.textOnButton(style.accentColor)
-      : this.textOnButton(style.buttonColor);
-    const focusScale = selected && !this.reducedMotion ? 1.018 : 1;
-    graphics.node.setScale(focusScale, focusScale, 1);
-  }
+  private drawHomeButton(g: StackUIVisual, label: Label, width: number, height: number, selected: boolean): void { this.renderer.renderButton(g,label,width,height,selected); }
 
   private updateHomeMenuFocus(): void {
     if (!this.settingsButtonGraphics || !this.leaderboardButtonGraphics || !this.startPromptLabel) {
@@ -1572,101 +1397,11 @@ export class StackGame extends Component {
       : this.textOnButton(CREAM_STYLE.buttonColor);
   }
 
-  private drawHomeFocus(graphics: Graphics, x: number, width: number, height: number): void {
-    graphics.strokeColor = this.textOnButton(CREAM_STYLE.panelColor);
-    graphics.lineWidth = 4;
-    graphics.roundRect(x - width / 2 - 8, -height / 2 - 8, width + 16, height + 16, 36);
-    graphics.stroke();
-    graphics.fillColor = this.textOnButton(CREAM_STYLE.accentColor);
-    graphics.moveTo(x - width / 2 + 26, -10);
-    graphics.lineTo(x - width / 2 + 39, 0);
-    graphics.lineTo(x - width / 2 + 26, 10);
-    graphics.close();
-    graphics.fill();
-  }
+  private drawOverlayBackdrop(g: StackUIVisual, panelWidth: number, panelHeight: number): void { this.renderer.renderBackdrop(g,panelWidth,panelHeight); }
 
-  private drawOverlayBackdrop(graphics: Graphics, panelWidth: number, panelHeight: number): void {
-    const style = CREAM_STYLE;
-    const safeInset = this.tvLayout ? TV_OVERSCAN_INSET : 24;
-    const effectiveWidth = Math.min(panelWidth, Math.max(0, this.visibleWidth - safeInset * 2));
-    const effectiveHeight = Math.min(panelHeight, Math.max(0, this.visibleHeight - safeInset * 2));
-    const panelX = this.panelCenterX(effectiveWidth);
-    graphics.clear();
-    graphics.fillColor = this.rgb(style.panelColor, 255);
-    graphics.roundRect(panelX - effectiveWidth * 0.5, -effectiveHeight * 0.5, effectiveWidth, effectiveHeight, 42);
-    graphics.fill();
-    graphics.strokeColor = this.rgb(style.accentColor, 130);
-    graphics.lineWidth = 2;
-    graphics.roundRect(panelX - effectiveWidth * 0.5, -effectiveHeight * 0.5, effectiveWidth, effectiveHeight, 42);
-    graphics.stroke();
-  }
+  private drawOverlayButton(ui: ButtonUI, width: number, height: number, selected: boolean, prominent = false): void { this.renderer.renderOverlayButton(ui,width,height,selected); }
 
-  private drawOverlayButton(ui: ButtonUI, width: number, height: number, selected: boolean, prominent = false): void {
-    // The hit rectangle, fill and focus use one size; avoid a second TV scale.
-    ui.node.getComponent(UITransform)?.setContentSize(width, height);
-    this.drawHomeButton(ui.graphics, ui.label, width, height, selected);
-  }
-
-  private drawSettingToggle(ui: ButtonUI, caption: string, enabled: boolean, selected: boolean): void {
-    const layout = this.panelLayout('settings');
-    this.drawOverlayButton(ui, layout.buttonWidth, layout.buttonHeight, selected);
-    ui.label.string = caption;
-    ui.label.horizontalAlign = Label.HorizontalAlign.LEFT;
-    ui.label.node.setPosition(-36, 0, 0);
-    ui.label.node.getComponent(UITransform)?.setContentSize(layout.buttonWidth - 200, layout.buttonHeight - 12);
-    let state = ui.node.getChildByName('SettingState')?.getComponent(Label);
-    if (!state) state = this.makeLabel('SettingState', ui.node, '', 30, Color.WHITE, 64, 56);
-    state.string = enabled ? COPY.enabled : COPY.disabled;
-    state.fontSize = layout.split ? 32 : 28;
-    state.lineHeight = Math.round(state.fontSize * 1.2);
-    state.isBold = true;
-    state.node.setPosition(layout.buttonWidth / 2 - 68, 0, 0);
-    state.color = ui.label.color;
-    const color = ui.label.color;
-    ui.graphics.fillColor = new Color(color.r, color.g, color.b, enabled ? 26 : 12);
-    ui.graphics.roundRect(layout.buttonWidth / 2 - 104, -28, 72, 56, 18);
-    ui.graphics.fill();
-    ui.graphics.strokeColor = new Color(color.r, color.g, color.b, 110);
-    ui.graphics.lineWidth = 2;
-    ui.graphics.roundRect(layout.buttonWidth / 2 - 104, -28, 72, 56, 18);
-    ui.graphics.stroke();
-  }
-
-  private buildNicknameEditor(): void {
-    this.nicknameGroup = this.makeFullNode('NicknameScreen', this.hudSafeRoot);
-    // Configure SINGLE_LINE before EditBox initializes its native DOM element.
-    this.nicknameGroup.active = false;
-    this.nicknameGroup.addComponent(BlockInputEvents);
-    this.nicknameGraphics = this.nicknameGroup.addComponent(Graphics);
-    this.makeCenteredLabel('NicknameTitle', this.nicknameGroup, '修改昵称', 54, 190, 520, 72, Color.WHITE);
-    this.makeCenteredLabel('NicknameDescription', this.nicknameGroup, '1–12 个字符 · 仅保存在本机', 24, 112, 520, 40, Color.WHITE);
-    const inputNode = this.makeNode('NicknameInput', this.nicknameGroup);
-    inputNode.addComponent(UITransform).setContentSize(500, 80);
-    this.anchorCenter(inputNode, 0, 28);
-    this.nicknameInputGraphics = inputNode.addComponent(Graphics);
-    this.nicknameEditor = inputNode.addComponent(EditBox);
-    this.nicknameEditor.inputMode = EditBox.InputMode.SINGLE_LINE;
-    this.nicknameEditor.inputFlag = EditBox.InputFlag.DEFAULT;
-    this.nicknameEditor.returnType = EditBox.KeyboardReturnType.DONE;
-    // Validate Unicode code points on save instead of truncating surrogate pairs.
-    this.nicknameEditor.maxLength = -1;
-    const text = this.nicknameEditor.textLabel
-      ?? this.makeLabel('NicknameText', inputNode, '', 34, Color.WHITE, 480, 80);
-    const placeholder = this.nicknameEditor.placeholderLabel
-      ?? this.makeLabel('NicknamePlaceholder', inputNode, '输入你的昵称', 30, Color.WHITE, 480, 80);
-    placeholder.string = '输入你的昵称';
-    for (const label of [text, placeholder]) {
-      label.node.getComponent(UITransform)?.setAnchorPoint(0, 1);
-      label.horizontalAlign = Label.HorizontalAlign.LEFT;
-      label.verticalAlign = Label.VerticalAlign.CENTER;
-      label.enableWrapText = false;
-    }
-    this.nicknameEditor.textLabel = text;
-    this.nicknameEditor.placeholderLabel = placeholder;
-    this.nicknameHint = this.makeCenteredLabel('NicknameHint', this.nicknameGroup, '', 22, -45, 520, 52, Color.WHITE);
-    this.nicknameSaveButton = this.makeOverlayButton(this.nicknameGroup, 'NicknameSave', '保存', 220, 88, -122, -142);
-    this.nicknameCancelButton = this.makeOverlayButton(this.nicknameGroup, 'NicknameCancel', '取消', 220, 88, 122, -142);
-  }
+  private drawSettingToggle(ui: ButtonUI, caption: string, enabled: boolean, selected: boolean): void { this.renderer.renderSettingToggle(ui,this.ui.settingStateLabels[ui===this.soundToggle?0:ui===this.motionToggle?1:2],caption,enabled,selected); }
 
   private updateNicknameEditorUI(): void {
     if (!this.nicknameGroup) return;
@@ -1676,10 +1411,7 @@ export class StackGame extends Component {
     const style = CREAM_STYLE;
     const text = this.textOnButton(style.panelColor);
     const g = this.nicknameGraphics;
-    g.clear();
-    g.fillColor = this.rgb(style.panelColor);
-    g.roundRect(-width / 2, -250, width, 500, 36);
-    g.fill();
+    g.reset();g.box(width,500,36,this.rgb(style.panelColor));
     this.layoutPanelLabel(this.nicknameGroup, 'NicknameTitle', 0, 176, content, 72, 52, true);
     this.layoutPanelLabel(this.nicknameGroup, 'NicknameDescription', 0, 104, content, 40, 24);
     this.layoutPanelLabel(this.nicknameGroup, 'NicknameHint', 0, -48, content, 52, 22);
@@ -1690,14 +1422,7 @@ export class StackGame extends Component {
       if (label) { label.color = text; label.fontSize = 32; label.lineHeight = 40; }
     }
     const input = this.nicknameInputGraphics;
-    input.clear();
-    input.fillColor = new Color(text.r, text.g, text.b, 18);
-    input.roundRect(-content / 2, -40, content, 80, 16);
-    input.fill();
-    input.lineWidth = this.nicknameSelection === 0 ? 4 : 2;
-    input.strokeColor = text;
-    input.roundRect(-content / 2, -40, content, 80, 16);
-    input.stroke();
+    input.reset();input.box(content,80,16,new Color(text.r,text.g,text.b,18),text,this.nicknameSelection===0?4:2);
     const buttonWidth = (content - 28) / 2;
     for (const [button, index, x] of [
       [this.nicknameSaveButton, 1, -(buttonWidth + 28) / 2],
@@ -1712,9 +1437,10 @@ export class StackGame extends Component {
     if (this.homeTransition || this.homeOverlay !== 'settings' || this.nicknameEditing) return;
     this.settingsSelection = 3;
     this.nicknameEditing = true;
+    this.router.push('nickname',this.settingsSelection);
     this.nicknameSelection = 0;
-    this.nicknameEditor.string = this.playerNickname;
-    this.nicknameHint.string = '保存后用于新成绩，已有成绩昵称不变';
+    this.patchPage('nickname',{draftText:this.playerNickname});
+    this.patchPage('nickname',{hintText:'保存后用于新成绩，已有成绩昵称不变'});
     this.settingsGroup.active = false;
     this.nicknameGroup.active = true;
     this.updateNicknameEditorUI();
@@ -1759,7 +1485,7 @@ export class StackGame extends Component {
     if (!this.nicknameEditing) return;
     const value = normalizeNickname(this.nicknameEditor.string);
     if (!value || Array.from(value).length > NICKNAME_MAX_LENGTH) {
-      this.nicknameHint.string = value ? '昵称最多 12 个字符，请缩短后保存' : '昵称不能为空';
+      this.patchPage('nickname',{hintText:value ? '昵称最多 12 个字符，请缩短后保存' : '昵称不能为空'});
       this.updateNicknameEditorUI();
       return;
     }
@@ -1774,12 +1500,13 @@ export class StackGame extends Component {
     this.nicknameEditor.blur();
     this.nicknameInputActive = false;
     this.nicknameEditing = false;
+    if(this.router.top==='nickname'){const route=this.router.pop();if(route)this.settingsSelection=route.returnFocus;}
     this.nicknameGroup.active = false;
     this.settingsGroup.active = true;
     this.settingsSelection = 3;
     this.updateSettingsUI();
     if (sys.isBrowser) this.focusGameCanvas();
-    this.lastActionAt = Date.now();
+    this.inputRouter.resetActionClock();
   }
 
   private updateSettingsUI(): void {
@@ -1792,151 +1519,24 @@ export class StackGame extends Component {
     this.drawSettingToggle(this.motionToggle, COPY.reducedMotion, this.reducedMotion, this.homeOverlay === 'settings' && this.settingsSelection === 1);
     this.updateTestModeUI();
     this.drawOverlayButton(this.nicknameButton, layout.buttonWidth, layout.buttonHeight, this.homeOverlay === 'settings' && this.settingsSelection === 3);
-    this.nicknameButton.label.node.setPosition(0, 20, 0);
-    this.nicknameButton.label.node.getComponent(UITransform)?.setContentSize(layout.buttonWidth - 100, 42);
+    this.nicknameButton.label.node.setPosition(0, 16, 0);
+    this.nicknameButton.label.node.getComponent(UITransform)?.setContentSize(layout.buttonWidth - 100, 32);
     this.nicknameButton.label.fontSize = layout.bodyFont - 6;
-    this.nicknameLabel.node.setPosition(0, -24, 0);
-    this.nicknameLabel.node.getComponent(UITransform)?.setContentSize(layout.buttonWidth - 80, 32);
-    this.nicknameLabel.string = this.playerNickname;
+    this.nicknameLabel.node.setPosition(0, -18, 0);
+    this.nicknameLabel.node.getComponent(UITransform)?.setContentSize(layout.buttonWidth - 80, 26);
+    this.patchPage('settings',{nickname:this.playerNickname});
     this.nicknameLabel.color = this.nicknameButton.label.color;
     this.nicknameLabel.enableWrapText = false;
     this.setNamedLabelText(this.settingsGroup, 'SettingsHint', this.nicknameStatus || COPY.settingsHint);
     this.drawOverlayButton(this.restoreStaminaButton, layout.buttonWidth, layout.buttonHeight, this.homeOverlay === 'settings' && this.settingsSelection === 4);
-    this.drawOverlayButton(this.settingsCloseButton, layout.buttonWidth, layout.buttonHeight, this.homeOverlay === 'settings' && this.settingsSelection === 5, true);
+    this.drawOverlayButton(this.appearanceToggle, layout.buttonWidth, layout.buttonHeight, this.homeOverlay === 'settings' && this.settingsSelection === 5);
+    this.patchPage('settings', { appearanceText: `画面风格 · ${this.creamAppearance === 'bright' ? '明亮' : '标准'}` });
+    this.drawOverlayButton(this.settingsCloseButton, layout.buttonWidth, layout.buttonHeight, this.homeOverlay === 'settings' && this.settingsSelection === 6, true);
   }
 
-  private buildRecordGapHud(): void {
-    const hud = this.hudLayout();
-    this.recordGapNode = this.makeNode('RecordGap', this.gameplayHudGroup);
-    this.recordGapNode.addComponent(UITransform).setContentSize(hud.recordGapWidth, hud.recordGapHeight);
-    this.anchorTopLeft(this.recordGapNode, hud.recordGapTop, hud.edgeInset);
-    this.recordGapGraphics = this.recordGapNode.addComponent(Graphics);
-    this.recordGapLabel = this.makeLabel('RecordGapText', this.recordGapNode, '', hud.captionSize,
-      Color.WHITE, hud.recordGapWidth - 24, hud.recordGapHeight - 8);
-    this.recordGapLabel.horizontalAlign = Label.HorizontalAlign.LEFT;
-    this.recordGapLabel.enableWrapText = false;
-    this.recordGapLabel.overflow = Label.Overflow.SHRINK;
-  }
+  private drawGameplayHudCards(): void { this.renderer.renderHudCards(); }
 
-  private drawGameplayHudCards(): void {
-    const style = CREAM_STYLE;
-    const panelText = this.rgb(style.textColor);
-    const layout = this.hudLayout();
-    const drawCard = (graphics: Graphics): void => {
-      graphics.clear();
-      graphics.fillColor = this.rgb(style.panelColor);
-      graphics.roundRect(-layout.cardWidth / 2, -layout.cardHeight / 2, layout.cardWidth, layout.cardHeight, 24);
-      graphics.fill();
-      graphics.strokeColor = this.rgb(style.accentColor, 112);
-      graphics.lineWidth = 2;
-      graphics.roundRect(-layout.cardWidth / 2, -layout.cardHeight / 2, layout.cardWidth, layout.cardHeight, 24);
-      graphics.stroke();
-    };
-    drawCard(this.scoreHudGraphics);
-    drawCard(this.bestHudGraphics);
-    this.scoreCaptionLabel.color = this.bestCaptionLabel.color = new Color(panelText.r, panelText.g, panelText.b, 225);
-    this.scoreLabel.color = this.bestLabel.color = panelText;
-    const gap = this.recordGapGraphics;
-    gap.clear();
-    gap.fillColor = this.rgb(style.panelColor);
-    gap.roundRect(-layout.recordGapWidth / 2, -layout.recordGapHeight / 2,
-      layout.recordGapWidth, layout.recordGapHeight, 12);
-    gap.fill();
-    this.recordGapLabel.color = panelText;
-    this.drawPauseHudButton();
-  }
-
-  private buildPauseUI(): void {
-    this.pauseButton = this.makeNode('PauseButton', this.hudSafeRoot);
-    this.pauseButton.addComponent(UITransform).setContentSize(132, 80);
-    this.anchorTopRight(this.pauseButton, 64, 64);
-    this.pauseButtonGraphics = this.pauseButton.addComponent(Graphics);
-    const pauseButton = this.pauseButton.addComponent(Button);
-    pauseButton.transition = Button.Transition.NONE;
-    this.pauseButtonLabel = this.makeLabel(
-      'PauseButtonLabel',
-      this.pauseButton,
-      `Ⅱ  ${COPY.pause}`,
-      24,
-      new Color(255, 255, 255, 238),
-      116,
-      60,
-    );
-    this.drawPauseHudButton();
-    this.pauseButton.active = false;
-
-    this.pauseGroup = this.makeFullNode('PauseScreen', this.hudSafeRoot);
-    this.pausePanelGraphics = this.pauseGroup.addComponent(Graphics);
-    this.pauseGroup.addComponent(BlockInputEvents);
-    this.makeCenteredLabel('PauseTitle', this.pauseGroup, COPY.paused, 56, 215, 580, 84, new Color(255, 255, 255, 255));
-    this.makeCenteredLabel('PauseHint', this.pauseGroup, COPY.pauseHint, 25, 150, 580, 54, new Color(255, 255, 255, 190));
-
-    const resume = this.makePauseMenuButton('ResumeButton', COPY.resume, 58);
-    this.resumeButton = resume.node;
-    this.resumeButtonGraphics = resume.graphics;
-    this.resumeButtonLabel = resume.label;
-
-    const restart = this.makePauseMenuButton('RestartButton', COPY.restartRound, -50);
-    this.restartButton = restart.node;
-    this.restartButtonGraphics = restart.graphics;
-    this.restartButtonLabel = restart.label;
-
-    const home = this.makePauseMenuButton('HomeButton', COPY.home, -158);
-    this.homeButton = home.node;
-    this.homeButtonGraphics = home.graphics;
-    this.homeButtonLabel = home.label;
-
-    this.makeCenteredLabel(
-      'PauseControls',
-      this.pauseGroup,
-      COPY.pauseControls,
-      22,
-      -265,
-      680,
-      52,
-      new Color(255, 255, 255, 150),
-    );
-    this.pauseSelection = 0;
-    this.updatePauseMenuFocus();
-    this.pauseGroup.active = false;
-  }
-
-  private makePauseMenuButton(
-    name: string,
-    text: string,
-    verticalCenter: number,
-  ): { node: Node; graphics: Graphics; label: Label } {
-    const node = this.makeNode(name, this.pauseGroup);
-    node.addComponent(UITransform).setContentSize(460, 100);
-    this.anchorCenter(node, 0, verticalCenter);
-    const graphics = node.addComponent(Graphics);
-    const button = node.addComponent(Button);
-    button.transition = Button.Transition.NONE;
-    const label = this.makeLabel(
-      `${name}Label`,
-      node,
-      text,
-      31,
-      new Color(255, 255, 255, 245),
-      420,
-      82,
-    );
-    return { node, graphics, label };
-  }
-
-  private drawPauseHudButton(): void {
-    const style = CREAM_STYLE;
-    const layout = this.hudLayout();
-    const g = this.pauseButtonGraphics;
-    g.clear();
-    g.fillColor = this.rgb(style.buttonColor);
-    g.roundRect(-layout.pauseWidth / 2, -layout.pauseHeight / 2, layout.pauseWidth, layout.pauseHeight, 28);
-    g.fill();
-    g.strokeColor = this.rgb(style.accentColor, 118);
-    g.lineWidth = 2;
-    g.roundRect(-layout.pauseWidth / 2, -layout.pauseHeight / 2, layout.pauseWidth, layout.pauseHeight, 28);
-    g.stroke();
-  }
+  private drawPauseHudButton(): void { this.renderer.renderPauseButton(); }
 
   private updatePauseMenuFocus(): void {
     this.drawPauseMenuButton(
@@ -1959,17 +1559,9 @@ export class StackGame extends Component {
     );
   }
 
-  private drawPauseMenuButton(graphics: Graphics, label: Label, node: Node, selected: boolean): void {
+  private drawPauseMenuButton(graphics: StackUIVisual, label: Label, node: Node, selected: boolean): void {
     const layout = this.panelLayout('pause');
     this.drawOverlayButton({ node, graphics, label }, layout.buttonWidth, layout.buttonHeight, selected);
-  }
-
-  private buildTestModeToggle(): void {
-    const ui = this.makeOverlayButton(this.settingsGroup, 'TestModeToggle', '', 500, 104, 0, -165);
-    this.testModeToggle = ui.node;
-    this.testModeToggleGraphics = ui.graphics;
-    this.testModeToggleLabel = ui.label;
-    this.updateTestModeUI();
   }
 
   private updateTestModeUI(): void {
@@ -1983,6 +1575,7 @@ export class StackGame extends Component {
   private showReadyScreen(): void {
     this.closeRevive();
     this.phase = 'ready';
+    this.router.reset('home');
     this.updateWorldComposition();
     this.phaseBeforePause = 'playing';
     this.world3D.reset();
@@ -2008,14 +1601,9 @@ export class StackGame extends Component {
     this.shakeX = 0;
     this.shakeY = 0;
     this.flashAlpha = 0;
-    this.lastActionAt = Date.now();
-    this.cameraY = 0;
-    this.targetCameraY = 0;
+    this.inputRouter.resetActionClock();
     this.current = null;
-    this.fallingPieces = [];
-    this.sparks = [];
-    this.rings = [];
-    this.perfectFrames = [];
+
     this.stack = [];
 
     for (let level = 0; level < 5; level += 1) {
@@ -2030,6 +1618,7 @@ export class StackGame extends Component {
       });
     }
 
+    this.world3D.restoreStack(this.stack);
     this.startGroup.active = true;
     this.resultGroup.active = false;
     this.pauseGroup.active = false;
@@ -2056,6 +1645,7 @@ export class StackGame extends Component {
     this.stamina ??= new Stamina(sys.localStorage);
     if (!this.testModeEnabled && !this.stamina.spend()) {
       this.updateStaminaUI();
+      this.openStaminaReward();
       return;
     }
     this.updateStaminaUI();
@@ -2073,6 +1663,7 @@ export class StackGame extends Component {
     this.resetPerfectFeedback();
     this.world3D.reset();
     this.phase = 'playing';
+    this.router.reset('gameplay');
     this.roundId = `round-${Date.now()}-${Math.random().toString(36).slice(2, 12)}`;
     this.roundWasTest = this.testModeEnabled;
     this.roundNickname = this.playerNickname;
@@ -2086,8 +1677,6 @@ export class StackGame extends Component {
     this.lastEarnedCoins = 0;
     this.resetPerfectChain();
     this.moveSpeed = INITIAL_MOVE_SPEED;
-    this.cameraY = 0;
-    this.targetCameraY = 0;
     this.trauma = 0;
     this.shakeTime = 0;
     this.shakeX = 0;
@@ -2096,10 +1685,7 @@ export class StackGame extends Component {
     this.spawnDelay = 0;
     this.resultDelay = 0;
     this.resumeInputLock = 0;
-    this.fallingPieces = [];
-    this.sparks = [];
-    this.rings = [];
-    this.perfectFrames = [];
+
     this.stack = [{ x: 0, z: 0, width: BASE_SIZE, depth: BASE_SIZE, level: 0, hue: this.hueForLevel(0) }];
     this.current = null;
 
@@ -2113,6 +1699,7 @@ export class StackGame extends Component {
     this.gameplayHudGroup.active = true;
     this.homeBestLabel.node.active = false;
     this.setScore(0, false);
+    this.world3D.restoreStack(this.stack);
     this.spawnMovingBlock();
     this.playSound('start', 0.8);
   }
@@ -2120,7 +1707,6 @@ export class StackGame extends Component {
   private spawnMovingBlock(): void {
     const previous = this.stack[this.stack.length - 1];
     const level = previous.level + 1;
-    this.openingBlockEntering = level === 1;
     this.moveAxis = level % 2 === 1 ? 'x' : 'z';
     // With the fixed camera, -X enters from upper left and -Z from upper right.
     this.moveDirection = 1;
@@ -2141,6 +1727,7 @@ export class StackGame extends Component {
     } else {
       this.current.z = previous.z - this.moveDirection * MOVE_RANGE;
     }
+    this.world3D.spawnMovingBlock(this.current);
   }
 
   private updateMovingBlock(dt: number): void {
@@ -2168,15 +1755,12 @@ export class StackGame extends Component {
     } else {
       this.current.z = resolved;
     }
-    const currentSize = this.moveAxis === 'x' ? this.current.width : this.current.depth;
-    const previousSize = this.moveAxis === 'x' ? previous.width : previous.depth;
-    if (Math.abs(resolved - center) < (currentSize + previousSize) * 0.5) {
-      this.openingBlockEntering = false;
-    }
+    this.world3D.updateMovingBlock(this.current);
+
   }
 
   private placeCurrentBlock(): void {
-    if (!this.current || this.openingBlockEntering || this.spawnDelay > 0 || this.phase !== 'playing') {
+    if (!this.current || this.spawnDelay > 0 || this.phase !== 'playing') {
       return;
     }
 
@@ -2246,7 +1830,6 @@ export class StackGame extends Component {
     this.current = null;
     this.phase = 'playing';
     this.setScore(this.score + 1, true);
-    this.targetCameraY = -Math.max(0, (this.stack.length - 5) * BLOCK_HEIGHT);
     this.spawnDelay = isPerfect ? 0.095 : CUT_PREVIEW_SECONDS;
   }
 
@@ -2306,7 +1889,7 @@ export class StackGame extends Component {
     }
 
     if (cutSize > 0.015) {
-      this.fallingPieces.push(fragment);
+
       return fragment;
     }
     return null;
@@ -2332,18 +1915,7 @@ export class StackGame extends Component {
   }
 
   private failPlacement(placed: StackBlock, delta: number): void {
-    const screenDirection = Math.sign(delta || 1) * (this.moveAxis === 'x' ? 1 : -1);
-    const miss: FallingPiece = {
-      ...placed,
-      offsetX: 0,
-      offsetY: 0,
-      velocityX: screenDirection * 125,
-      velocityY: 30,
-      rotation: 0,
-      angularVelocity: screenDirection * 1.45,
-      opacity: 255,
-    };
-    this.fallingPieces.push(miss);
+
     this.world3D.releaseMiss(placed, this.moveAxis, delta);
     this.current = null;
     this.phase = 'falling';
@@ -2355,7 +1927,7 @@ export class StackGame extends Component {
       : GAME_OVER_REVEAL_SECONDS;
     this.restartLock = this.resultDelay + 0.25;
     this.resetPerfectChain();
-    this.perfectFrames = [];
+
     this.resetPerfectFeedback();
     this.addTrauma(0.72);
     this.flashAlpha = this.reducedMotion ? 0 : 0.28;
@@ -2365,6 +1937,7 @@ export class StackGame extends Component {
   private showResultScreen(): void {
     if (this.phase === 'gameover') return;
     this.phase = 'gameover';
+    this.router.reset('result');
     this.recordLeaderboardResult();
     this.updateWorldComposition();
     this.resultSelection = this.reviveUsed ? 1 : 0;
@@ -2390,14 +1963,9 @@ export class StackGame extends Component {
 
     this.updateBestLabel();
     this.updateCoinLabels();
-    this.resultTitleLabel.string = newBest ? COPY.newBest : COPY.gameOver;
-    this.resultScoreLabel.string = `${this.score}`;
-    this.resultBestLabel.string = this.testModeEnabled
-      ? `测试成绩 · ${COPY.best} ${this.bestScore}`
-      : `${COPY.best}  ${this.bestScore}`;
-    this.resultCoinLabel.string = this.testModeEnabled
-      ? COPY.noTestCoins
-      : `${COPY.perfectReward} ${this.roundPerfectCount} 次  ·  ${COPY.coins} +${this.lastEarnedCoins}`;
+    this.patchPage('result',{title:newBest?COPY.newBest:COPY.gameOver,score:this.score,
+      bestText:this.testModeEnabled?`测试成绩 · ${COPY.best} ${this.bestScore}`:`${COPY.best}  ${this.bestScore}`,
+      coinText:this.testModeEnabled?COPY.noTestCoins:`${COPY.perfectReward} ${this.roundPerfectCount} 次  ·  ${COPY.coins} +${this.lastEarnedCoins}`});
     this.resultBestLabel.lineHeight = Math.round(this.resultBestLabel.fontSize * 1.2);
     this.resultGroup.active = true;
     this.resultGroup.setScale(this.reducedMotion ? 1 : 0.86, this.reducedMotion ? 1 : 0.86, 1);
@@ -2408,7 +1976,8 @@ export class StackGame extends Component {
 
   private setScore(value: number, animate: boolean): void {
     this.score = value;
-    this.scoreLabel.string = `${this.score}`;
+    this.patchPage('hud',{score:this.score});
+    if(this.stamina)this.uiAdapter.publish();
     this.updateRecordGap();
     if (!animate) {
       this.scoreLabel.node.setScale(1, 1, 1);
@@ -2423,17 +1992,18 @@ export class StackGame extends Component {
   }
 
   private updateRecordGap(): void {
-    this.recordGapNode.active = !(this.roundWasTest || this.testModeEnabled);
-    if (!this.recordGapNode.active) return;
+    const visible=!(this.roundWasTest||this.testModeEnabled);
+    this.patchPage('hud',{recordGapVisible:visible});
+    if(!visible)return;
 
     const remaining = this.roundBestScore - this.score;
-    this.recordGapLabel.string = this.roundBestScore === 0
+    this.patchPage('hud',{recordGapText:this.roundBestScore === 0
       ? (this.score === 0 ? '创造你的首个纪录' : `首个纪录：${this.score} 层`)
       : remaining > 0
         ? `距最高还差 ${remaining} 层`
         : remaining === 0
           ? '已追平 · 再叠 1 层破纪录'
-          : `已超过最高 ${-remaining} 层`;
+          : `已超过最高 ${-remaining} 层`});
   }
 
   private resetPerfectFeedback(): void {
@@ -2449,7 +2019,7 @@ export class StackGame extends Component {
     const peakScale = this.reducedMotion ? 1 : 1 + Math.min(0.22, (energy - 1) * 0.048);
     Tween.stopAllByTarget(this.perfectOpacity);
     Tween.stopAllByTarget(this.perfectLabel.node);
-    this.perfectLabel.string = this.perfectStreak > 1 ? `${COPY.perfect}  ×${this.perfectStreak}` : COPY.perfect;
+    this.patchPage('hud',{perfectText:this.perfectStreak > 1 ? `${COPY.perfect}  ×${this.perfectStreak}` : COPY.perfect});
     this.perfectOpacity.opacity = 255;
     this.perfectLabel.node.setScale(0.82, 0.82, 1);
     this.perfectLabel.node.setPosition(0, 228, 0);
@@ -2468,152 +2038,15 @@ export class StackGame extends Component {
       .start();
   }
 
-  private spawnImpactFx(block: StackBlock, perfect: boolean, intensity = 1): void {
-    const streak = Math.max(1, intensity);
-    const energy = this.perfectFeedbackEnergy(streak);
-    const amount = perfect ? Math.min(88, Math.round(17 + streak * 4 + energy * 4)) : 8;
-    const accentColor = new Color(255, 238, 166, 255);
-    const contactCenter = perfect ? this.project(block.x, block.z, block.level) : null;
-    for (let index = 0; index < amount; index += 1) {
-      const angle = (Math.PI * 2 * index) / amount + Math.random() * 0.28;
-      const isFastSpark = perfect && index % 5 === 0;
-      const baseSpeed = perfect
-        ? 96 + energy * 15 + Math.random() * (72 + energy * 16)
-        : 58 + Math.random() * 45;
-      const speed = baseSpeed * (isFastSpark ? 1.3 : 1);
-      const perfectLife = Math.min(0.72, 0.45 + (energy - 1) * 0.065);
-      const sparkLife = perfectLife * (isFastSpark ? 0.72 : 1);
-      const hasTrail = perfect && (isFastSpark || index % 3 === 0);
-      // The fixed camera faces +X/+Z. Rear seams are hidden by the upper block;
-      // UI particles have no depth test, so emit only along the two visible edges.
-      const edgePosition = -1 + 2 * (index + 0.5) / amount;
-      const worldX = block.x + (perfect ? (index % 2 === 0 ? 1 : edgePosition) * block.width * 0.5 : 0);
-      const worldZ = block.z + (perfect ? (index % 2 === 0 ? edgePosition : 1) * block.depth * 0.5 : 0);
-      const projectedEdge = perfect ? this.project(worldX, worldZ, block.level) : null;
-      const dx = projectedEdge && contactCenter ? projectedEdge.x - contactCenter.x : Math.cos(angle);
-      const dy = projectedEdge && contactCenter ? projectedEdge.y - contactCenter.y : Math.sin(angle);
-      const directionLength = perfect ? Math.max(1, Math.hypot(dx, dy)) : 1;
-      this.sparks.push({
-        x: 0,
-        y: 0,
-        worldX,
-        worldZ,
-        level: perfect ? block.level : block.level + 1,
-        vx: dx / directionLength * speed,
-        vy: dy / directionLength * speed + 30,
-        life: perfect ? sparkLife : 0.48,
-        maxLife: perfect ? sparkLife : 0.48,
-        size: perfect
-          ? (isFastSpark
-            ? 2.4 + Math.random() * (2 + energy * 0.36)
-            : 3.2 + Math.random() * (3.4 + energy * 0.78))
-          : 2 + Math.random() * 3,
-        trailLength: hasTrail
-          ? (isFastSpark ? 14 + energy * 4 : 8 + energy * 3) + Math.random() * 5
-          : 0,
-        color: perfect
-          ? (!isFastSpark && streak >= 3 && index % 4 === 0
-            ? accentColor
-            : new Color(255, 255, 255, 255))
-          : this.hslToColor(block.hue + 18, 82, 74),
-      });
-    }
+  private spawnImpactFx(block: StackBlock, perfect: boolean, intensity = 1): void { if(perfect)this.world3D.prepareProjection(this.ui.gameplayFx.node);this.ui.gameplayFx.emitImpact(block,perfect,intensity); }
 
-    if (this.sparks.length > 128) {
-      this.sparks.splice(0, this.sparks.length - 128);
-    }
-
-    if (!perfect) {
-      this.rings.push({
-        worldX: block.x,
-        worldZ: block.z,
-        level: block.level + 1,
-        life: 0.3,
-        maxLife: 0.3,
-        radius: 10,
-        color: this.hslToColor(block.hue, 78, 80),
-      });
-    }
-  }
-
-  private spawnPerfectFrames(block: StackBlock, intensity: number): void {
-    const streak = Math.max(1, intensity);
-    const energy = this.perfectFeedbackEnergy(streak);
-    const waveCount = this.reducedMotion
-      ? 1
-      : Math.min(6, Math.max(1, Math.ceil(Math.log2(streak + 1))));
-    const primaryAlpha = this.reducedMotion
-      ? Math.min(220, 140 + (energy - 1) * 18)
-      : Math.min(255, 164 + (energy - 1) * 25);
-
-    for (let wave = 0; wave < waveCount; wave += 1) {
-      const waveFade = Math.pow(0.72, wave);
-      this.perfectFrames.push({
-        block: { ...block },
-        elapsed: 0,
-        delay: this.reducedMotion ? 0 : wave * 0.045,
-        duration: this.reducedMotion
-          ? 0.24
-          : 0.34 + Math.min(0.16, (energy - 1) * 0.03) + wave * 0.045,
-        startExpansion: this.reducedMotion ? 10 : 5 + wave * 4,
-        maxExpansion: this.reducedMotion ? 10 : 42 + (energy - 1) * 15 + wave * 11,
-        alpha: Math.max(42, primaryAlpha * waveFade),
-        // UI effects have no depth test: a filled contact plane would paint over the block.
-        fillAlpha: 0,
-        lineWidth: this.reducedMotion
-          ? Math.min(5, 2.5 + (energy - 1) * 0.35)
-          : Math.max(1.7, 2.8 + Math.min(2.2, (energy - 1) * 0.48) - wave * 0.16),
-      });
-    }
-
-    if (this.perfectFrames.length > 12) {
-      this.perfectFrames.splice(0, this.perfectFrames.length - 12);
-    }
-  }
+  private spawnPerfectFrames(block: StackBlock, intensity: number): void { this.ui.gameplayFx.emitPerfectFrames(block,intensity,this.reducedMotion); }
 
   private perfectFeedbackEnergy(streak: number): number {
     return 1 + Math.log2(Math.max(1, streak));
   }
 
-  private updateParticles(dt: number): void {
-    for (const spark of this.sparks) {
-      spark.life -= dt;
-      spark.x += spark.vx * dt;
-      spark.y += spark.vy * dt;
-      spark.vy -= 190 * dt;
-      spark.vx *= Math.pow(0.18, dt);
-    }
-    this.sparks = this.sparks.filter((spark) => spark.life > 0);
-
-    for (const ring of this.rings) {
-      ring.life -= dt;
-      ring.radius += dt * 190;
-    }
-    this.rings = this.rings.filter((ring) => ring.life > 0);
-
-    for (const frame of this.perfectFrames) {
-      frame.elapsed += dt;
-    }
-    this.perfectFrames = this.perfectFrames.filter((frame) => frame.elapsed < frame.delay + frame.duration);
-  }
-
-  private updateFallingPieces(dt: number): void {
-    for (const piece of this.fallingPieces) {
-      piece.velocityY -= 820 * dt;
-      piece.offsetX += piece.velocityX * dt;
-      piece.offsetY += piece.velocityY * dt;
-      piece.rotation += piece.angularVelocity * dt;
-      if (piece.offsetY < -this.visibleHeight * 0.58) {
-        piece.opacity -= dt * 440;
-      }
-    }
-    this.fallingPieces = this.fallingPieces.filter((piece) => piece.opacity > 0);
-  }
-
-  private updateCamera(dt: number): void {
-    const follow = 1 - Math.exp(-5.2 * dt);
-    this.cameraY += (this.targetCameraY - this.cameraY) * follow;
-  }
+  private updateParticles(dt: number): void { if(!this.ui.gameplayFx.needsSimulation)return;this.performanceProbe.beginSection('fx');this.ui.gameplayFx.step(dt);this.performanceProbe.endSection('fx'); }
 
   private addTrauma(amount: number, cap = 1): void {
     if (this.reducedMotion) {
@@ -2631,177 +2064,29 @@ export class StackGame extends Component {
   }
 
   private drawFrame(): void {
-    const g = this.graphics;
-    const effects = this.effectsGraphics;
-    g.clear();
-    effects.clear();
-    this.world3D.sync(this.stack, this.current);
-    this.drawEffects(effects);
-    this.drawOverlay();
-    if (!this.homeTransition) this.drawScreenDimmer(this.screenDimmerAlpha());
-    if (this.flashAlpha > 0) {
-      effects.fillColor = new Color(255, 255, 255, Math.round(this.flashAlpha * 255));
-      effects.rect(-this.visibleWidth * 0.5, -this.visibleHeight * 0.5, this.visibleWidth, this.visibleHeight);
-      effects.fill();
+    this.flushPageViews();
+    const fx=this.ui.gameplayFx;
+    fx.setFlash(this.flashAlpha);
+    if(fx.needsRender){
+      this.performanceProbe.beginSection('fx');
+      if(fx.needsProjection)this.world3D.prepareProjection(fx.node);
+      fx.render(this.visibleWidth,this.visibleHeight);
+      this.frameProjectionCalls+=fx.projectionCallsLastRender;this.frameProjectionCacheHits+=fx.projectionCacheHitsLastRender;
+      this.performanceProbe.endSection('fx');
     }
-  }
-
-  private drawEffects(g: Graphics): void {
-    for (const frame of this.perfectFrames) {
-      if (frame.elapsed < frame.delay) {
-        continue;
-      }
-      const progress = Math.min(1, (frame.elapsed - frame.delay) / frame.duration);
-      const eased = 1 - Math.pow(1 - progress, 3);
-      const fadeIn = Math.min(1, (frame.elapsed - frame.delay) / 0.035);
-      const fade = fadeIn * Math.pow(1 - progress, 1.18);
-      const center = this.project(frame.block.x, frame.block.z, frame.block.level);
-      const basePoints = this.blockPlanePoints(frame.block, frame.block.level);
-      const baseHalfWidth = Math.max(...basePoints.map(point => Math.abs(point.x - center.x)));
-      const horizontalRoom = Math.max(0, this.visibleWidth * 0.5 - 32 - Math.abs(center.x) - baseHalfWidth);
-      const maxExpansion = Math.min(frame.maxExpansion, horizontalRoom);
-      const startExpansion = Math.min(frame.startExpansion, maxExpansion);
-      const expansionPixels = startExpansion + (maxExpansion - startExpansion) * eased;
-      const projectedScale = Math.max(1, baseHalfWidth * 2 / (frame.block.width + frame.block.depth));
-      const expansion = expansionPixels / projectedScale;
-      const outline: StackBlock = {
-        ...frame.block,
-        width: frame.block.width + expansion,
-        depth: frame.block.depth + expansion,
-      };
-      const points = this.blockPlanePoints(outline, frame.block.level);
-      if (frame.fillAlpha > 0) {
-        const fillFade = fadeIn * Math.pow(1 - progress, 4);
-        this.fillPolygon(
-          g,
-          points,
-          new Color(255, 255, 255, Math.round(frame.fillAlpha * fillFade)),
-        );
-      }
-      g.strokeColor = new Color(255, 255, 255, Math.round(frame.alpha * fade));
-      g.lineWidth = frame.lineWidth;
-      // Only the front contact edges are visible; don't draw rear edges through
-      // the upper block's top face (these effects live on a depthless UI layer).
-      g.moveTo(points[1].x, points[1].y);
-      g.lineTo(points[2].x, points[2].y);
-      g.lineTo(points[3].x, points[3].y);
-      g.stroke();
+    if(this.renderedPhase !== this.phase || this.renderedOverlay !== this.homeOverlay || this.layoutDirty) {
+      this.presenter.invalidate();
+      this.uiAdapter.publish();
+      this.renderedPhase=this.phase; this.renderedOverlay=this.homeOverlay; this.layoutDirty=false;
     }
-
-    for (const ring of this.rings) {
-      const ratio = Math.max(0, ring.life / ring.maxLife);
-      const center = this.project(ring.worldX, ring.worldZ, ring.level);
-      g.strokeColor = new Color(ring.color.r, ring.color.g, ring.color.b, Math.round(ring.color.a * ratio));
-      g.lineWidth = 1 + ratio * 2.5;
-      g.circle(center.x, center.y, ring.radius);
-      g.stroke();
-    }
-
-    for (const spark of this.sparks) {
-      const ratio = Math.max(0, spark.life / spark.maxLife);
-      const visibility = Math.pow(ratio, 0.65);
-      const alpha = Math.round(255 * visibility);
-      g.fillColor = new Color(spark.color.r, spark.color.g, spark.color.b, alpha);
-      const size = Math.max(0.9, spark.size * (0.42 + ratio * 0.58));
-      const anchor = this.project(spark.worldX, spark.worldZ, spark.level);
-      const x = anchor.x + spark.x;
-      const y = anchor.y + spark.y;
-      if (spark.trailLength > 0) {
-        const speed = Math.max(1, Math.hypot(spark.vx, spark.vy));
-        const trail = spark.trailLength * visibility;
-        g.strokeColor = new Color(spark.color.r, spark.color.g, spark.color.b, Math.round(alpha * 0.72));
-        g.lineWidth = Math.max(1, size * 0.58);
-        g.moveTo(x - (spark.vx / speed) * trail, y - (spark.vy / speed) * trail);
-        g.lineTo(x, y);
-        g.stroke();
-      }
-      g.rect(
-        x - size * 0.5,
-        y - size * 0.5,
-        size,
-        size,
-      );
-      g.fill();
-    }
+    if(this.presenter.pending){this.performanceProbe.beginSection('ui');this.presenter.flush();this.performanceProbe.endSection('ui');}
   }
 
-  private drawOverlay(): void {
-    this.homePanelGraphics.clear();
-    this.pausePanelGraphics.clear();
-    this.resultPanelGraphics.clear();
-    const g = this.phase === 'ready' ? this.homePanelGraphics
-      : this.phase === 'paused' ? this.pausePanelGraphics : this.resultPanelGraphics;
-    const style = CREAM_STYLE;
-    // Overlay screens own their backdrop; the home panel must not show through.
-    if (this.phase === 'ready' && this.homeOverlay !== 'none') {
-      return;
-    }
-    if (this.phase === 'ready') {
-      const layout = this.homeLayout();
-      const { panelWidth, panelHeight } = layout;
-      const homeX = layout.panelX;
-      g.fillColor = new Color(0, 0, 0, 28);
-      g.roundRect(homeX - panelWidth * 0.5 + 8, -panelHeight * 0.5 - 10, panelWidth, panelHeight, 44);
-      g.fill();
-      g.fillColor = this.rgb(style.panelColor);
-      g.roundRect(homeX - panelWidth * 0.5, -panelHeight * 0.5, panelWidth, panelHeight, 44);
-      g.fill();
-      g.strokeColor = this.rgb(style.accentColor, 96);
-      g.lineWidth = 2;
-      g.roundRect(homeX - panelWidth * 0.5, -panelHeight * 0.5, panelWidth, panelHeight, 44);
-      g.stroke();
-      g.fillColor = this.rgb(style.accentColor);
-      g.roundRect(homeX - 28, panelHeight * 0.5 - 44, 56, 5, 2.5);
-      g.fill();
-    } else if (this.phase === 'paused') {
-      this.drawProjectorPanel(g, this.panelLayout('pause'));
-    } else if (this.phase === 'gameover') {
-      this.drawProjectorPanel(g, this.panelLayout('result'));
-    }
-  }
-
-  private topPoints(block: StackBlock): Point2[] {
-    return this.blockPlanePoints(block, block.level + 1);
-  }
-
-  private blockPlanePoints(block: StackBlock, level: number): Point2[] {
-    const halfW = block.width * 0.5;
-    const halfD = block.depth * 0.5;
-    return [
-      this.project(block.x - halfW, block.z - halfD, level),
-      this.project(block.x + halfW, block.z - halfD, level),
-      this.project(block.x + halfW, block.z + halfD, level),
-      this.project(block.x - halfW, block.z + halfD, level),
-    ];
-  }
-
-  private project(x: number, z: number, level: number): Point2 {
-    return this.world3D.projectToUI(x, z, level, this.effectsGraphics.node);
-  }
-
-  private fillPolygon(g: Graphics, points: Point2[], color: Color): void {
-    g.fillColor = color;
-    g.moveTo(points[0].x, points[0].y);
-    for (let index = 1; index < points.length; index += 1) {
-      g.lineTo(points[index].x, points[index].y);
-    }
-    g.close();
-    g.fill();
-  }
-
-  private rotatePoint(point: Point2, center: Point2, radians: number): Point2 {
-    const cosine = Math.cos(radians);
-    const sine = Math.sin(radians);
-    const dx = point.x - center.x;
-    const dy = point.y - center.y;
-    return {
-      x: center.x + dx * cosine - dy * sine,
-      y: center.y + dx * sine + dy * cosine,
-    };
-  }
+  private drawOverlay(): void { this.renderer.renderOverlay(this.phase,this.homeOverlay); }
 
   private initializeAudio(): void {
-    this.audioSource = this.node.getComponent(AudioSource) ?? this.node.addComponent(AudioSource);
+    this.audioSource = this.node.getComponent(AudioSource)!;
+    if (!this.audioSource) throw new Error('StackGame: Canvas AudioSource must be serialized');
     this.audioSource.playOnAwake = false;
     this.audioSource.loop = false;
     this.audioSource.volume = 0.7;
@@ -2823,25 +2108,28 @@ export class StackGame extends Component {
 
   private updateAudioPrompt(): void {
     if (this.startPromptLabel?.isValid) {
-      this.startPromptLabel.string = this.audioReady
-        ? (!this.testModeEnabled && this.stamina?.snapshot().amount === 0 ? '体力不足，等待恢复'
+      const text = this.adNotice || (this.audioReady
+        ? (!this.testModeEnabled && this.stamina?.snapshot().amount === 0 ? '体力不足，看视频可恢复'
           : (this.wideLayout ? COPY.startRemote : COPY.start))
-        : COPY.loadingAudio;
+        : COPY.loadingAudio);
+      this.patchPage('home',{startText:text});
     }
   }
 
   private updateStaminaUI(): void {
-    if (!this.stamina) return;
+    if (!this.stamina || ![this.startGroup,this.pauseGroup,this.resultGroup,this.settingsGroup].some(node=>node?.activeInHierarchy)) return;
     const now = Date.now();
-    const { amount, nextAt } = this.stamina.snapshot(now);
-    const seconds = nextAt === null ? 0 : Math.max(0, Math.ceil((nextAt - now) / 1000));
-    const countdown = `${(`0${Math.floor(seconds / 60)}`).slice(-2)}:${(`0${seconds % 60}`).slice(-2)}`;
-    const text = this.testModeEnabled ? `体力 ${amount}/${STAMINA_CAP} · 测试不消耗`
-      : `体力 ${amount}/${STAMINA_CAP} · ${nextAt === null ? '已满'  : `${countdown} 后恢复`}`;
-    if (this.homeStaminaLabel && this.homeStaminaLabel.string !== text) this.homeStaminaLabel.string = text;
-    const restartText = !this.testModeEnabled && amount === 0 ? `体力不足 ${countdown}` : COPY.restartRound;
-    if (this.restartButtonLabel) this.restartButtonLabel.string = restartText;
-    if (this.resultRestartButton?.label) this.resultRestartButton.label.string = restartText;
+    const { amount } = this.stamina.snapshot(now);
+    if (this.startGroup.active) this.patchPage('home', { staminaText: amount <= STAMINA_CAP ? `${amount}/${STAMINA_CAP}` : amount <= 10 ? `${amount}/10` : `${amount}` });
+    // Clamp only the icons: advertising rewards keep their full stored balance.
+    this.homeStaminaIcons?.forEach((icon, index) => {
+      const available = index < amount;
+      icon.grayscale = !available;
+      icon.color = available ? new Color(255, 255, 255, 255) : new Color(175, 175, 175, 255);
+    });
+    const restartText = this.adNotice || (!this.testModeEnabled && amount === 0 ? '体力不足，看视频可恢复' : COPY.restartRound);
+    if(this.pauseGroup.active)this.patchPage('pause',{restartText});
+    if(this.resultGroup.active)this.patchPage('result',{restartText});
     this.updateAudioPrompt();
   }
 
@@ -2925,7 +2213,8 @@ export class StackGame extends Component {
   private openHomeOverlayImmediately(overlay: Exclude<HomeOverlay, 'none'>): void {
     this.homeLeaderboardPreviewRequest += 1;
     this.homeOverlay = overlay;
-    this.lastActionAt = Date.now();
+    this.router.commitPush(overlay,this.homeSelection);
+    this.inputRouter.resetActionClock();
     this.startGroup.active = false;
     this.settingsGroup.active = overlay === 'settings';
     this.leaderboardGroup.active = overlay === 'leaderboard';
@@ -2935,8 +2224,7 @@ export class StackGame extends Component {
       this.settingsSelection = 0;
       this.updateSettingsUI();
     } else {
-      this.leaderboardScroll?.stopAutoScroll();
-      this.leaderboardScroll?.scrollToTop(0);
+        this.leaderboardScroll?.scrollToTop(0);
       this.leaderboardScrollTarget = 0;
       void this.loadLeaderboard();
     }
@@ -2953,6 +2241,7 @@ export class StackGame extends Component {
   }
 
   private closeHomeOverlayImmediately(): void {
+    this.leaderboardScroll.stopAutoScroll();
     Tween.stopAllByTarget(this.settingsGroup);
     Tween.stopAllByTarget(this.leaderboardGroup);
     this.leaderboardRequest += 1;
@@ -2961,9 +2250,11 @@ export class StackGame extends Component {
     this.leaderboardGroup.setScale(1, 1, 1);
     this.settingsGroup.active = false;
     this.settingsGroup.setScale(1, 1, 1);
+    const previousRoute=this.router.commitPop();
+    if(previousRoute)this.homeSelection=previousRoute.returnFocus;
     this.homeOverlay = 'none';
     this.startGroup.active = true;
-    this.lastActionAt = Date.now();
+    this.inputRouter.resetActionClock();
     this.updateHomeMenuFocus();
     this.updateSettingsUI();
     void this.loadHomeLeaderboardPreview();
@@ -3008,16 +2299,22 @@ export class StackGame extends Component {
 
   private onRestoreStamina(): void {
     if (this.homeOverlay !== 'settings') return;
-    this.stamina ??= new Stamina(sys.localStorage);
-    this.stamina.restore();
     this.settingsSelection = 4;
-    this.nicknameStatus = '体力已恢复至 5/5 · 每 30 分钟恢复 1 点';
-    this.updateStaminaUI();
+    this.openStaminaReward();
+  }
+
+  private onAppearanceToggle(): void {
+    if (this.homeOverlay !== 'settings') return;
+    this.settingsSelection = 5;
+    this.creamAppearance = this.creamAppearance === 'standard' ? 'bright' : 'standard';
+    this.world3D.setAppearance(this.creamAppearance);
+    const saved = saveCreamAppearance(sys.localStorage, this.creamAppearance);
+    this.nicknameStatus = saved ? '画面风格已保存 · 立即生效' : '画面本次生效 · 本机存储不可用';
     this.updateSettingsUI();
   }
 
   private moveSettingsSelection(direction: number): void {
-    this.settingsSelection = (this.settingsSelection + (direction > 0 ? 1 : -1) + 6) % 6;
+    this.settingsSelection = (this.settingsSelection + (direction > 0 ? 1 : -1) + 7) % 7;
     this.updateSettingsUI();
   }
 
@@ -3032,6 +2329,8 @@ export class StackGame extends Component {
       this.openNicknameEditor();
     } else if (this.settingsSelection === 4) {
       this.onRestoreStamina();
+    } else if (this.settingsSelection === 5) {
+      this.onAppearanceToggle();
     } else {
       this.closeHomeOverlay();
     }
@@ -3060,11 +2359,12 @@ export class StackGame extends Component {
 
     this.phaseBeforePause = this.phase;
     this.phase = 'paused';
+    this.router.push('pause',this.pauseSelection);
     this.updateWorldComposition();
     this.world3D.setPaused(true);
     this.pauseSelection = 0;
     this.resumeInputLock = 0;
-    this.lastActionAt = Date.now();
+    this.inputRouter.resetActionClock();
     this.trauma = 0;
     this.shakeTime = 0;
     this.shakeX = 0;
@@ -3094,13 +2394,14 @@ export class StackGame extends Component {
     this.pauseGroup.active = false;
     this.pauseGroup.setScale(1, 1, 1);
     this.phase = this.phaseBeforePause;
+    this.router.pop();
     this.updateWorldComposition();
     this.world3D.setPaused(false);
     this.pauseButton.active = true;
     this.gameplayHudGroup.active = true;
     this.testModeBadgeLabel.node.active = this.testModeEnabled;
     this.resumeInputLock = 0.14;
-    this.lastActionAt = Date.now();
+    this.inputRouter.resetActionClock();
   }
 
   private returnToHome(): void {
@@ -3113,6 +2414,7 @@ export class StackGame extends Component {
 
   private beginScreenTransition(swap: () => void, kind: ScreenTransitionKind = 'game-start'): void {
     if (this.homeTransition) return;
+    if (this.reviveGroup?.active) this.closeRevive();
     if (this.reducedMotion) {
       swap();
       this.drawFrame();
@@ -3131,10 +2433,11 @@ export class StackGame extends Component {
       fadeWorld: kind === 'game-start' || kind === 'home-return', fromDim, toDim,
     };
     this.captureTransitionViews();
-    this.transitionBlocker.active = true;
+    this.transitionController.begin({duration:this.homeTransition.outSeconds+this.homeTransition.inSeconds,
+      onProgress:()=>{},onComplete:()=>this.finishScreenTransition(),onCancel:()=>{this.restoreTransitionViews();this.homeTransition=null;}});
     // Keep residual impact flashes out of navigation, without touching physics.
-    this.effectsGraphics.clear();
-    this.effectsGraphics.node.active = false;
+    this.ui.gameplayFx.clear();
+    this.ui.gameplayFx.node.active = false;
     this.drawScreenDimmer(fromDim);
   }
 
@@ -3152,7 +2455,8 @@ export class StackGame extends Component {
       const widget = node.getComponent(Widget);
       widget?.updateAlignment();
       const position = new Vec3(node.position.x, node.position.y, node.position.z);
-      const opacity = node.getComponent(UIOpacity) ?? node.addComponent(UIOpacity);
+      const opacity = node.getComponent(UIOpacity);
+      if(!opacity) throw new Error('Missing prefab UIOpacity: '+node.name);
       this.transitionViews.push({ node, widget, position, widgetEnabled: widget?.enabled ?? false, opacity, baseOpacity: opacity.opacity, slide });
       if (widget) widget.enabled = false;
     }
@@ -3184,7 +2488,7 @@ export class StackGame extends Component {
   }
 
   private homeDimmerAlpha(): number {
-    return 18;
+    return 6;
   }
 
   private screenDimmerAlpha(): number {
@@ -3192,13 +2496,7 @@ export class StackGame extends Component {
     return this.phase === 'paused' || this.phase === 'gameover' ? MENU_DIMMER_MAX_ALPHA : 0;
   }
 
-  private drawScreenDimmer(alpha: number): void {
-    const g = this.screenDimmer;
-    g.clear();
-    g.fillColor = new Color(2, 8, 18, Math.round(Math.max(0, Math.min(MENU_DIMMER_MAX_ALPHA, alpha))));
-    g.rect(-this.visibleWidth / 2, -this.visibleHeight / 2, this.visibleWidth, this.visibleHeight);
-    g.fill();
-  }
+  private drawScreenDimmer(alpha: number): void { this.renderer.renderDimmer(alpha); }
 
   private updateHomeTransition(dt: number): void {
     const transition = this.homeTransition;
@@ -3234,19 +2532,25 @@ export class StackGame extends Component {
     const transition = this.homeTransition;
     this.restoreTransitionViews();
     this.homeTransition = null;
+    this.transitionController.cancel();
     this.transitionBlocker.active = false;
-    this.effectsGraphics.node.active = true;
+    this.ui.gameplayFx.node.active = true;
     this.world3D.setPresentationOpacity(1);
     this.world3D.setPaused(this.phase === 'paused');
     if (transition?.pauseOnComplete && (this.phase === 'playing' || this.phase === 'dropping')) this.pauseGame();
-    this.lastActionAt = Date.now();
+    this.inputRouter.resetActionClock();
     this.drawScreenDimmer(this.screenDimmerAlpha());
   }
 
   private updateResultFocus(): void {
     const layout = this.panelLayout('result');
+    if (this.reviveUsed && this.resultSelection === 0) this.resultSelection = 1;
+    const visibleButtons = (this.reviveUsed ? [this.resultRestartButton, this.resultHomeButton]
+      : [this.resultReviveButton, this.resultRestartButton, this.resultHomeButton]).filter(Boolean);
+    visibleButtons.forEach((button, index) => this.layoutPanelButton(button, layout.panelX, layout.buttonYs[index],
+      layout.buttonWidth, layout.buttonHeight, layout.bodyFont));
     if (this.resultReviveButton) {
-      this.resultReviveButton.label.string = this.reviveUsed ? '本局已复活' : '扫码复活 · 免费';
+      this.patchPage('result',{reviveEnabled:!this.reviveUsed,reviveText:'看视频 · 复活'});
       this.drawOverlayButton(this.resultReviveButton, layout.buttonWidth, layout.buttonHeight, this.resultSelection === 0);
     }
     this.drawOverlayButton(this.resultRestartButton, layout.buttonWidth, layout.buttonHeight, this.resultSelection === 1);
@@ -3303,7 +2607,7 @@ export class StackGame extends Component {
   }
 
   private onGameHide(): void {
-    this.heldKeys.clear();
+    this.inputRouter.clear();
     if (this.homeTransition) {
       this.homeTransition.pauseOnComplete = true;
       this.updateHomeTransition(this.homeTransition.outSeconds + this.homeTransition.inSeconds);
@@ -3319,8 +2623,7 @@ export class StackGame extends Component {
 
   private handleKeyDownCode(keyCode: number): void {
     if (this.nicknameEditing) {
-      if (this.heldKeys.has(keyCode)) return;
-      this.heldKeys.add(keyCode);
+      if (!this.inputRouter.keyDown(keyCode)) return;
       if (keyCode === KeyCode.ESCAPE || REMOTE_BACK_KEY_CODES.has(keyCode)) this.closeNicknameEditor();
       else if (!this.nicknameInputActive) {
         if (keyCode === KeyCode.ARROW_UP || keyCode === KeyCode.ARROW_LEFT) this.moveNicknameSelection(-1);
@@ -3350,16 +2653,16 @@ export class StackGame extends Component {
       || keyCode === KeyCode.KEY_K
       || isPauseToggle
       || isMenuNavigation;
-    if (!isActionKey || this.heldKeys.has(keyCode)) {
+    if (!isActionKey || !this.inputRouter.keyDown(keyCode)) {
       return;
     }
-    this.heldKeys.add(keyCode);
     // Remember keys pressed during a transition until keyup, so a held remote
     // confirm cannot fall through to the freshly revealed round.
     if (this.homeTransition) return;
 
     if (this.reviveGroup?.active) {
-      if (isBackKey || isConfirmKey) this.closeRevive();
+      if (isBackKey) this.closeRevive();
+      else if (isConfirmKey) this.onRewardDialogAction();
       return;
     }
 
@@ -3444,7 +2747,7 @@ export class StackGame extends Component {
 
   private onKeyUp(event: EventKeyboard): void {
     if (sys.isBrowser) return;
-    this.heldKeys.delete(event.keyCode as number);
+    this.inputRouter.keyUp(event.keyCode as number);
   }
 
   private onGamepadInput(event: EventGamepad): void {
@@ -3480,7 +2783,8 @@ export class StackGame extends Component {
     }
     if (this.homeTransition) return;
     if (this.reviveGroup?.active) {
-      if (eastJustPressed || optionsJustPressed || southJustPressed) this.closeRevive();
+      if (eastJustPressed || optionsJustPressed) this.closeRevive();
+      else if (southJustPressed) this.onRewardDialogAction();
       return;
     }
     if (this.phase === 'gameover') {
@@ -3565,13 +2869,7 @@ export class StackGame extends Component {
   }
 
   private consumeActionDebounce(): boolean {
-    if (this.homeTransition) return false;
-    const now = Date.now();
-    if (now - this.lastActionAt < 90) {
-      return false;
-    }
-    this.lastActionAt = now;
-    return true;
+    return this.inputRouter.acceptAction(!!this.homeTransition || this.router.transitionLocked,90);
   }
 
   private tryPrimaryAction(): void {
@@ -3611,6 +2909,14 @@ export class StackGame extends Component {
   }
 
   private resizeStage(): void {
+    const visible=view.getVisibleSize(), frame=screen.windowSize;
+    const safe=sys.getSafeAreaRect();
+    this.layoutService.update({width:visible.width,height:visible.height,frameWidth:frame.width,frameHeight:frame.height,
+      safeLeft:Math.max(0,safe.x),safeBottom:Math.max(0,safe.y),safeRight:Math.max(0,frame.width-safe.x-safe.width),safeTop:Math.max(0,frame.height-safe.y-safe.height),pixelRatio:sys.isBrowser?window.devicePixelRatio:1});
+  }
+
+  private applyViewportLayout(): void {
+    this.layoutDirty = true;
     const visible = view.getVisibleSize();
     const frame = screen.windowSize;
     this.visibleWidth = visible.width;
@@ -3626,15 +2932,19 @@ export class StackGame extends Component {
     this.compactPortrait = !this.wideLayout
       && frame.width < COMPACT_PORTRAIT_MAX_FRAME_WIDTH
       && frame.width < frame.height;
-    this.isoX = Math.max(33, Math.min(43, this.visibleWidth / 18.5));
-    this.isoY = this.isoX * 0.5;
-    this.worldOriginY = -this.visibleHeight * 0.3;
 
     this.node.getComponent(UITransform)?.setContentSize(visible);
-    this.graphics?.node.getComponent(UITransform)?.setContentSize(visible);
-    this.effectsGraphics?.node.getComponent(UITransform)?.setContentSize(visible);
+    this.graphics?.getComponent(UITransform)?.setContentSize(visible);
+    this.ui.gameplayFx.node.getComponent(UITransform).setContentSize(visible);
+    this.ui.node.getComponent(UITransform)?.setContentSize(visible);
+    this.screenDimmer.node.getComponent(UITransform).setContentSize(visible);
     this.hudSafeRoot?.getComponent(UITransform)?.setContentSize(visible);
     this.hudSafeRoot?.getComponent(SafeArea)?.updateArea();
+    this.ui.node.getComponent(Widget)?.updateAlignment();
+    this.ui.pageLayoutRoots.forEach((layout,index)=>{
+      layout.getComponent(Widget)?.updateAlignment();
+      this.ui.pageVisualRoots[index].getComponent(UITransform).setContentSize(layout.getComponent(UITransform).contentSize);
+    });
     this.applyResponsiveLayout();
     this.updateWorldComposition();
 
@@ -3647,19 +2957,9 @@ export class StackGame extends Component {
     }
   }
 
-  private animatePrompt(): void {
-    if (!this.startGroup.active) {
-      return;
-    }
-    const prompt = this.startGroup.getChildByName('StartPrompt');
-    if (!prompt) {
-      return;
-    }
-    const pulse = this.reducedMotion ? 1 : 1 + Math.sin(this.promptTime * 2.8) * 0.025;
-    prompt.setScale(pulse, pulse, 1);
-  }
 
   private loadSettings(): void {
+    this.creamAppearance = loadCreamAppearance(sys.localStorage);
     // Retired appearance choices must never affect the fixed cream style.
     // Clean each key independently so unavailable storage cannot reset progress.
     for (const key of ['wxstack-selected-skin', 'wxstack-owned-skins']) {
@@ -3725,18 +3025,9 @@ export class StackGame extends Component {
     }
   }
 
-  private updateBestLabel(): void {
-    this.bestLabel.string = `${this.bestScore}`;
-    if (this.homeBestLabel?.isValid) {
-      this.homeBestLabel.string = `${this.bestScore}`;
-    }
-  }
+  private updateBestLabel(): void { this.patchPage('hud',{bestScore:this.bestScore});this.patchPage('home',{bestScore:this.bestScore});if(this.stamina)this.uiAdapter.publish(); }
 
-  private updateCoinLabels(): void {
-    if (this.homeCoinLabel?.isValid) {
-      this.homeCoinLabel.string = `${this.coins}`;
-    }
-  }
+  private updateCoinLabels(): void { this.patchPage('home',{coins:this.coins});if(this.stamina)this.uiAdapter.publish(); }
 
   private notifyBrowserReady(): void {
     if (this.browserReadyNotified || !sys.isBrowser || typeof window === 'undefined') {
@@ -3747,7 +3038,7 @@ export class StackGame extends Component {
     // rendered frames, including first-use material preparation.
     director.once(Director.EVENT_AFTER_DRAW, () => {
       director.once(Director.EVENT_AFTER_DRAW, () => {
-        if (this.isValid) window.dispatchEvent(new Event('stack-game-ready'));
+        if (this.isValid && this.uiReady && !this.uiSuspended) window.dispatchEvent(new Event('stack-game-ready'));
       });
     });
   }
@@ -3774,18 +3065,8 @@ export class StackGame extends Component {
     this.homeBestLabel.color = panelText;
     this.homeBestCaption.color = new Color(panelText.r, panelText.g, panelText.b, 215);
     this.homeCoinCaption.color = new Color(panelText.r, panelText.g, panelText.b, 215);
-    const badge = this.homeBestBadge.getComponent(Graphics);
-    badge.clear();
-    const home = this.homeLayout();
-    for (const x of [-home.statOffset, home.statOffset]) {
-      badge.fillColor = new Color(panelText.r, panelText.g, panelText.b, 16);
-      badge.roundRect(x - home.statWidth / 2, -home.statsHeight / 2, home.statWidth, home.statsHeight, 22);
-      badge.fill();
-      badge.strokeColor = this.rgb(style.accentColor, 80);
-      badge.lineWidth = 1.5;
-      badge.roundRect(x - home.statWidth / 2, -home.statsHeight / 2, home.statWidth, home.statsHeight, 22);
-      badge.stroke();
-    }
+    const home=this.homeLayout();
+    this.ui.homeStatVisuals.forEach((badge,i)=>{badge.reset();badge.box(home.statWidth,home.statsHeight,22,new Color(panelText.r,panelText.g,panelText.b,16),this.rgb(style.accentColor,80),1.5,i===0?-home.statOffset:home.statOffset);});
     this.testModeBadgeLabel.color = text;
     this.perfectLabel.color = new Color(114, 66, 84);
 
@@ -3838,129 +3119,6 @@ export class StackGame extends Component {
     return luminance > 0.179 ? new Color(0, 0, 0, 255) : new Color(255, 255, 255, 255);
   }
 
-  private lerpPoint(a: Point2, b: Point2, t: number): Point2 {
-    return { x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t };
-  }
-
-  private hslToColor(hue: number, saturation: number, lightness: number, alpha = 255): Color {
-    const h = ((hue % 360) + 360) % 360 / 360;
-    const s = Math.max(0, Math.min(1, saturation / 100));
-    const l = Math.max(0, Math.min(1, lightness / 100));
-    const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
-    const p = 2 * l - q;
-    const channel = (offset: number): number => {
-      let t = h + offset;
-      if (t < 0) t += 1;
-      if (t > 1) t -= 1;
-      if (t < 1 / 6) return p + (q - p) * 6 * t;
-      if (t < 1 / 2) return q;
-      if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
-      return p;
-    };
-    if (s === 0) {
-      const gray = Math.round(l * 255);
-      return new Color(gray, gray, gray, Math.round(alpha));
-    }
-    return new Color(
-      Math.round(channel(1 / 3) * 255),
-      Math.round(channel(0) * 255),
-      Math.round(channel(-1 / 3) * 255),
-      Math.round(alpha),
-    );
-  }
-
-  private makeNode(name: string, parent: Node): Node {
-    const node = new Node(name);
-    node.parent = parent;
-    node.layer = parent.layer;
-    return node;
-  }
-
-  private makeFullNode(name: string, parent: Node): Node {
-    const node = this.makeNode(name, parent);
-    node.addComponent(UITransform).setContentSize(DESIGN_WIDTH, DESIGN_HEIGHT);
-    const widget = node.addComponent(Widget);
-    widget.isAlignTop = true;
-    widget.isAlignBottom = true;
-    widget.isAlignLeft = true;
-    widget.isAlignRight = true;
-    widget.top = 0;
-    widget.bottom = 0;
-    widget.left = 0;
-    widget.right = 0;
-    return node;
-  }
-
-  private makeLabel(
-    name: string,
-    parent: Node,
-    text: string,
-    fontSize: number,
-    color: Color,
-    width: number,
-    height: number,
-  ): Label {
-    const node = this.makeNode(name, parent);
-    node.addComponent(UITransform).setContentSize(width, height);
-    const label = node.addComponent(Label);
-    label.string = text;
-    label.fontSize = fontSize;
-    label.lineHeight = Math.round(fontSize * 1.2);
-    label.color = color;
-    label.horizontalAlign = Label.HorizontalAlign.CENTER;
-    label.verticalAlign = Label.VerticalAlign.CENTER;
-    label.overflow = Label.Overflow.SHRINK;
-    label.enableWrapText = true;
-    return label;
-  }
-
-  private makeCenteredLabel(
-    name: string,
-    parent: Node,
-    text: string,
-    fontSize: number,
-    verticalCenter: number,
-    width: number,
-    height: number,
-    color: Color,
-  ): Label {
-    const label = this.makeLabel(name, parent, text, fontSize, color, width, height);
-    this.anchorCenter(label.node, 0, verticalCenter);
-    return label;
-  }
-
-  private anchorTopCenter(node: Node, top: number): void {
-    const widget = node.addComponent(Widget);
-    widget.isAlignTop = true;
-    widget.isAlignHorizontalCenter = true;
-    widget.top = top;
-    widget.horizontalCenter = 0;
-  }
-
-  private anchorTopRight(node: Node, top: number, right: number): void {
-    const widget = node.addComponent(Widget);
-    widget.isAlignTop = true;
-    widget.isAlignRight = true;
-    widget.top = top;
-    widget.right = right;
-  }
-
-  private anchorTopLeft(node: Node, top: number, left: number): void {
-    const widget = node.addComponent(Widget);
-    widget.isAlignTop = true;
-    widget.isAlignLeft = true;
-    widget.top = top;
-    widget.left = left;
-  }
-
-  private anchorCenter(node: Node, horizontalCenter: number, verticalCenter: number): void {
-    const widget = node.addComponent(Widget);
-    widget.isAlignHorizontalCenter = true;
-    widget.isAlignVerticalCenter = true;
-    widget.horizontalCenter = horizontalCenter;
-    widget.verticalCenter = verticalCenter;
-  }
-
   private panelCenterX(panelWidth = HOME_PANEL_WIDTH): number {
     if (!this.wideLayout) {
       return 0;
@@ -3989,10 +3147,10 @@ export class StackGame extends Component {
     return {
       split, panelX, panelWidth, panelHeight, contentWidth,
       titleY: 354 * verticalScale, titleSize: Math.min(split ? 140 : 112, contentWidth / 4.5) * verticalScale,
-      subtitleY: 230 * verticalScale, statsY: 90 * verticalScale,
+      subtitleY: 230 * verticalScale, statsY: 122 * verticalScale,
       statsHeight: 140 * verticalScale, statWidth, statOffset: (statWidth + 24) / 2,
       buttonWidth, buttonHeight: 116 * verticalScale,
-      startY: -90 * verticalScale, rankY: -242 * verticalScale, settingsY: -394 * verticalScale,
+      startY: -112 * verticalScale, rankY: -264 * verticalScale, settingsY: -416 * verticalScale,
       footerY: -505 * verticalScale,
     };
   }
@@ -4018,8 +3176,24 @@ export class StackGame extends Component {
     if (this.homeStaminaLabel) {
       const gapTop = layout.statsY - layout.statsHeight / 2;
       const gapBottom = layout.startY + layout.buttonHeight / 2;
-      place(this.homeStaminaLabel, x, (gapTop + gapBottom) / 2, width, gapTop - gapBottom, layout.split ? 26 : 23);
+      const iconSize = Math.min(52, (gapTop - gapBottom) * 0.68);
+      const spacing = iconSize * 0.32;
+      const step = iconSize + spacing;
+      const y = (gapTop + gapBottom) / 2;
+      this.homeStaminaLabel.node.active = true;
+      const numberWidth = 100;
+      const numberGap = 18;
+      const iconsWidth = (STAMINA_CAP - 1) * step + iconSize;
+      const rowLeft = x - (iconsWidth + numberGap + numberWidth) / 2;
+      place(this.homeStaminaLabel, rowLeft + iconsWidth + numberGap + numberWidth / 2, y, numberWidth, 44, layout.split ? 30 : 28);
+      this.homeStaminaLabel.isBold = true;
+      this.homeStaminaLabel.overflow = Label.Overflow.SHRINK;
+      this.homeStaminaIcons.forEach((icon, index) => {
+        icon.node.setPosition(rowLeft + iconSize / 2 + index * step, y, 0);
+        icon.node.getComponent(UITransform)!.setContentSize(iconSize, iconSize);
+      });
     }
+
     if (eyebrow) place(eyebrow, x, layout.panelHeight / 2 - 76, width, 42, layout.split ? 30 : 25);
     this.setCenteredNodeLayout(this.homeBestBadge, x, layout.statsY);
     this.homeBestBadge.getComponent(UITransform)?.setContentSize(layout.buttonWidth, layout.statsHeight);
@@ -4058,24 +3232,7 @@ export class StackGame extends Component {
     return projectorHudLayout(this.visibleWidth, this.visibleHeight);
   }
 
-  private drawProjectorPanel(g: Graphics, layout: ReturnType<typeof projectorPanelLayout>): void {
-    const { panelX: x, panelWidth: width, panelHeight: height } = layout;
-    const style = CREAM_STYLE;
-    g.clear();
-    g.fillColor = new Color(0, 0, 0, 28);
-    g.roundRect(x - width / 2 + 8, -height / 2 - 10, width, height, 44);
-    g.fill();
-    g.fillColor = this.rgb(style.panelColor);
-    g.roundRect(x - width / 2, -height / 2, width, height, 44);
-    g.fill();
-    g.strokeColor = this.rgb(style.accentColor, 96);
-    g.lineWidth = 2;
-    g.roundRect(x - width / 2, -height / 2, width, height, 44);
-    g.stroke();
-    g.fillColor = this.rgb(style.accentColor);
-    g.roundRect(x - 28, height / 2 - 44, 56, 5, 2.5);
-    g.fill();
-  }
+  private drawProjectorPanel(g: StackUIVisual, layout: {panelX:number;panelWidth:number;panelHeight:number}): void { this.renderer.renderPanel(g,layout); }
 
   private layoutPanelLabel(parent: Node, name: string, x: number, y: number, width: number, height: number, fontSize: number, bold = false): void {
     const label = parent.getChildByName(name)?.getComponent(Label);
@@ -4131,12 +3288,12 @@ export class StackGame extends Component {
 
     for (const [kind, group, title, hint, buttons] of [
       ['settings', this.settingsGroup, 'SettingsTitle', 'SettingsHint', [this.soundToggle, this.motionToggle,
-        { node: this.testModeToggle, graphics: this.testModeToggleGraphics, label: this.testModeToggleLabel }, this.nicknameButton, this.restoreStaminaButton, this.settingsCloseButton]],
+        { node: this.testModeToggle, graphics: this.testModeToggleGraphics, label: this.testModeToggleLabel }, this.nicknameButton, this.restoreStaminaButton, this.appearanceToggle, this.settingsCloseButton]],
       ['pause', this.pauseGroup, 'PauseTitle', 'PauseHint', [
         { node: this.resumeButton, graphics: this.resumeButtonGraphics, label: this.resumeButtonLabel },
         { node: this.restartButton, graphics: this.restartButtonGraphics, label: this.restartButtonLabel },
         { node: this.homeButton, graphics: this.homeButtonGraphics, label: this.homeButtonLabel }]],
-      ['result', this.resultGroup, 'ResultTitle', '', [this.resultReviveButton, this.resultRestartButton, this.resultHomeButton].filter(Boolean)],
+      ['result', this.resultGroup, 'ResultTitle', '', (this.reviveUsed ? [this.resultRestartButton, this.resultHomeButton] : [this.resultReviveButton, this.resultRestartButton, this.resultHomeButton]).filter(Boolean)],
       ['leaderboard', this.leaderboardGroup, 'LeaderboardTitle', 'LeaderboardStatus', []],
     ] as ['settings' | 'pause' | 'result' | 'leaderboard', Node, string, string, ButtonUI[]][]) {
       const layout = this.panelLayout(kind);
